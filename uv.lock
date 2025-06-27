@@ -306,6 +306,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "boto3" },
+    { name = "mp-pyrho" },
     { name = "pymatgen" },
     { name = "ruff" },
 ]
@@ -313,6 +314,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.38.45" },
+    { name = "mp-pyrho", specifier = ">=0.4.5" },
     { name = "pymatgen", specifier = ">=2025.6.14" },
     { name = "ruff", specifier = ">=0.12.1" },
 ]
@@ -371,6 +373,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/89/54/a1b2b4c9b16ebc5ea72cf22b1a6bb7ceaa79187fbf22a404c9677c8f90dd/monty-2025.3.3.tar.gz", hash = "sha256:16c1eb54b2372e765c2f3f14cff01cc76ab55c3cc12b27d49962fb8072310ae0", size = 85592, upload-time = "2025-03-03T21:12:44.541Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/df/b3a36544734be3ac0eacf11bcfb8609464dd07d8bad0dff6e46109c68002/monty-2025.3.3-py3-none-any.whl", hash = "sha256:5eadb6d748c007bc63c34eceb2d80faff18f3996121d261dbceeea22adc58775", size = 51925, upload-time = "2025-03-03T21:12:42.598Z" },
+]
+
+[[package]]
+name = "mp-pyrho"
+version = "0.4.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pymatgen" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/20/39/d8d911262241a7715bab7d5d4f5d2f33dcc81ef67f94ed7b881d221371a3/mp_pyrho-0.4.5.tar.gz", hash = "sha256:6705a9fd4cdb01435bd9f0884f5a1ac9289cf2b6bd3caf288653c96afc90bba4", size = 2422370, upload-time = "2024-10-22T22:21:33.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/13/c95ef0ded603781142acce1046d37a46ade928ac3608189f0794587717d3/mp_pyrho-0.4.5-py3-none-any.whl", hash = "sha256:c9ee1a91c271e25940739883d876a2a476b064d8430c7da4c4b0f95f6bbbc5bd", size = 18446, upload-time = "2024-10-22T22:21:31.694Z" },
 ]
 
 [[package]]
