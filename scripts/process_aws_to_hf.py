@@ -1,3 +1,10 @@
+'''
+HF DataFrame Rows
+
+| ID | LeMat-Bulk ID | BAWL Hash | Functional | Lattice Vectors | Species at Sites | Cartesian Site Positions | Normalized charge density | Normalized AECCAR0 | Normalized AECCAR1 | Normalized AECCAR2 | Bader Charge Partition | DDEC6 Charge Partition |
+
+'''
+
 import boto3
 import gzip
 import io
@@ -6,6 +13,9 @@ from botocore.config import Config
 import json
 
 from pymatgen.io.vasp import Chgcar
+
+from pyrho.pgrid import PGrid
+from pyrho.charge_density import ChargeDensity
 
 AWS_BUCKET_NAME = "materialsproject-parsed"
 
@@ -35,12 +45,16 @@ class ChgCarProcessor:
         self.chgcar = Chgcar.from_dict(
             json.loads(self.file_obj.read().decode("utf-8"))["data"]
         )
+        self.to_hf_data()
 
     def to_hf_data(self):
-        pass
+        chg_density = ChargeDensity.from_pmg(self.chgcar)
+        print(self.chgcar.structure)
+        for pgrid in chg_density.pgrids.values():
+            print(pgrid.lossy_smooth_compression([30,30,30]))
 
 
 if __name__ == "__main__":
-    stream_gz_file_from_aws_bucket(
+    print(stream_gz_file_from_aws_bucket(
         s3_key="chgcars/mp-1000002.json.gz", processor_cls=ChgCarProcessor
-    )
+    ))
