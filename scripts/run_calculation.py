@@ -1,0 +1,345 @@
+from jobflow import SETTINGS
+from fireworks import LaunchPad
+from jobflow.managers.fireworks import flow_to_workflow
+from atomate2.vasp.flows.mp import MPMetaGGADoubleRelaxStaticMaker
+from atomate2.vasp.flows.matpes import MatPesStaticFlowMaker
+from atomate2.vasp.flows.core import DoubleRelaxMaker
+from atomate2.vasp.jobs.mp import MPMetaGGARelaxMaker
+from atomate2.vasp.jobs.matpes import MatPesMetaGGAStaticMaker, MatPesGGAStaticMaker
+from typing import Optional, Dict, Any
+from atomate2.vasp.powerups import update_user_incar_settings
+from pymatgen.core import Structure
+from jobflow import Flow
+
+"""Create and submit a workflow for relaxing a crystal structure using MatPES settings.
+Important to set one consistent worker type for all calculations of a workflow due to copying of WAVECAR (requires same number of Cores with Ncore).
+Three functions are provided:
+1. relax: for double relaxation followed by a static calculation.
+2. static: for a single static calculation.
+3. static_off_equilibrium: Usually off-equilibrium structures are harder to converge,
+so this first does a PBE static calculation, then a meta-GGA static calculation.
+update LargeSigmaHandler line 1427 with
+            actions.append(
+                {
+                    "dict": "INCAR",
+                    "action": {"_set": {"ICHARG": 1}},
+                }
+            )
+"""
+
+
+def relax(
+    structure: Structure,
+    metadata: Dict[str, Any],
+    KPAR: int = 2,
+    NCORE: int = 2,
+    worker: Optional[str] = None
+) -> None:
+    """
+    Create and submit a workflow for relaxing a crystal structure using a double relaxation
+     followed by a static calculation all with MatPES settings.
+
+    Parameters:
+        structure (Structure):
+            The pymatgen Structure object to relax.
+        metadata (Dict[str, Any]):
+            Additional metadata for the workflow. Must be provided and include a mat_id key.
+            Ideally also previous ehull, energy, volume and band gap.
+        KPAR (int, optional):
+            K-point parallelization parameter. Default is 2.
+        NCORE (int, optional):
+            Number of cores per band calculation group. Default is 2.
+        worker (str, optional):
+            Worker identifier for the workflow manager.
+
+    Raises:
+        ValueError: If mat_id is not provided in metadata.
+
+    Returns:
+        None: The workflow is submitted directly to the LaunchPad.
+    """
+    mat_id = metadata.get("mat_id", None)
+    if mat_id is None:
+        raise ValueError("Metadata must include a 'mat_id' key.")
+
+    incar_settings = {"KPAR": KPAR, "NCORE": NCORE}
+
+    incar_settings_relax = incar_settings.copy()
+    incar_settings_relax.update({
+        "ISIF": 3,
+        "NSW": 100,
+        "EDIFFG": -0.02,
+        "IBRION": 2,
+        "LWAVE": True,
+    })
+    # Setup relaxation makers
+    relax_maker_1 = MatPesMetaGGAStaticMaker(
+        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        task_document_kwargs={"store_trajectory": True}
+    )
+
+    relax_maker_2 = MPMetaGGARelaxMaker(
+        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
+        task_document_kwargs={"store_trajectory": True}
+    )
+
+    double_relax_maker = DoubleRelaxMaker(
+        name=f"LeMatRhoDoubleRelaxMaker-{mat_id}",
+        relax_maker1=relax_maker_1,
+        relax_maker2=relax_maker_2
+    )
+    double_relax_maker = update_user_incar_settings(
+        double_relax_maker,
+        incar_settings_relax,
+    )
+
+    static_maker = MatPesMetaGGAStaticMaker(
+        name=f"LeMatRhoStaticMaker-{mat_id}",
+        copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
+    )
+    static_maker = update_user_incar_settings(
+        static_maker,
+        incar_settings,
+    )
+    relax_workflow_maker = MPMetaGGADoubleRelaxStaticMaker(
+        name=f"LeMatRhoDoubleRelaxStaticMaker-{mat_id}",
+        relax_maker=double_relax_maker,
+        static_maker=static_maker
+    )
+
+    relax_flow = relax_workflow_maker.make(structure)
+
+    # Set worker and metadata, most likely separate workers for different Nbands
+    relax_flow.update_config({"manager_config": {"_fworker": worker}})
+    relax_flow.update_metadata(metadata)
+
+    # Convert flow to Fireworks workflow and submit to db
+    workflow = flow_to_workflow(relax_flow)
+    lpad = LaunchPad.auto_load()
+    lpad.add_wf(workflow)
+
+
+def relax_start_pbe(
+    structure: Structure,
+    metadata: Dict[str, Any],
+    KPAR: int = 2,
+    NCORE: int = 2,
+    worker: Optional[str] = None
+) -> None:
+    """
+    Create and submit a workflow for relaxing a crystal structure using a 
+     a static pbe calculation followed by a double relaxation
+     followed by a static calculation all with MatPES settings.
+
+    Parameters:
+        structure (Structure):
+            The pymatgen Structure object to relax.
+        metadata (Dict[str, Any]):
+            Additional metadata for the workflow. Must be provided and include a mat_id key.
+            Ideally also previous ehull, energy, volume and band gap.
+        KPAR (int, optional):
+            K-point parallelization parameter. Default is 2.
+        NCORE (int, optional):
+            Number of cores per band calculation group. Default is 2.
+        worker (str, optional):
+            Worker identifier for the workflow manager.
+
+    Raises:
+        ValueError: If mat_id is not provided in metadata.
+
+    Returns:
+        None: The workflow is submitted directly to the LaunchPad.
+    """
+    mat_id = metadata.get("mat_id", None)
+    if mat_id is None:
+        raise ValueError("Metadata must include a 'mat_id' key.")
+
+    incar_settings = {"KPAR": KPAR, "NCORE": NCORE}
+
+    incar_settings_relax = incar_settings.copy()
+    incar_settings_relax.update({
+        "ISIF": 3,
+        "NSW": 100,
+        "EDIFFG": -0.02,
+        "IBRION": 2,
+        "LWAVE": True,
+    })
+    # Setup relaxation makers
+    incar_settings_pre_static = incar_settings.copy()
+    incar_settings_pre_static.update({
+        "LWAVE": True,
+    })
+    pre_static_maker = MatPesGGAStaticMaker(
+        name=f"LeMatRhoPreStaticMaker-{mat_id}"
+    )
+    pre_static_maker = update_user_incar_settings(
+        pre_static_maker,
+        incar_settings_pre_static,
+    )
+
+    relax_maker_1 = MatPesMetaGGAStaticMaker(
+        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        task_document_kwargs={"store_trajectory": True},
+        copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
+    )
+
+    relax_maker_2 = MPMetaGGARelaxMaker(
+        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
+        task_document_kwargs={"store_trajectory": True},
+    )
+
+    double_relax_maker = DoubleRelaxMaker(
+        name=f"LeMatRhoDoubleRelaxMaker-{mat_id}",
+        relax_maker1=relax_maker_1,
+        relax_maker2=relax_maker_2
+    )
+    double_relax_maker = update_user_incar_settings(
+        double_relax_maker,
+        incar_settings_relax,
+    )
+
+    static_maker = MatPesMetaGGAStaticMaker(
+        name=f"LeMatRhoStaticMaker-{mat_id}",
+        copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
+    )
+    static_maker = update_user_incar_settings(
+        static_maker,
+        incar_settings,
+    )
+    relax_workflow_maker = MPMetaGGADoubleRelaxStaticMaker(
+        name=f"LeMatRhoDoubleRelaxStaticMaker-{mat_id}",
+        relax_maker=double_relax_maker,
+        static_maker=static_maker,
+    )
+    pre_static_job = pre_static_maker.make(structure)
+    relax_flow = relax_workflow_maker.make(
+        pre_static_job.output.structure,
+        prev_dir=pre_static_job.output.dir_name
+    )
+    complete_flow = Flow([pre_static_job, relax_flow])
+
+    # Set worker and metadata, most likely separate workers for different Nbands
+    complete_flow.update_config({"manager_config": {"_fworker": worker}})
+    complete_flow.update_metadata(metadata)
+
+    # Convert flow to Fireworks workflow and submit to db
+    workflow = flow_to_workflow(complete_flow)
+    lpad = LaunchPad.auto_load()
+    lpad.add_wf(workflow)
+
+
+def static_calculation(
+    structure: Structure,
+    metadata: Dict[str, Any],
+    KPAR: int = 2,
+    NCORE: int = 2,
+    worker: Optional[str] = None
+) -> None:
+    """
+    Create and submit a workflow for a single static calculation using MatPES settings.
+
+    Parameters:
+        structure (Structure):
+            The pymatgen Structure object to run a static calculation on.
+        metadata (Dict[str, Any]):
+            Additional metadata for the workflow. Must include a mat_id key.
+        KPAR (int, optional):
+            K-point parallelization parameter. Default is 2.
+        NCORE (int, optional):
+            Number of cores per band calculation group. Default is 2.
+        worker (str, optional):
+            Worker identifier for the workflow manager.
+
+    Raises:
+        ValueError: If metadata is not provided.
+
+    Returns:
+        None: The workflow is submitted directly to the LaunchPad.
+    """
+    mat_id = metadata.get("mat_id")
+    if not mat_id:
+        raise ValueError("Metadata must include a 'mat_id' key.")
+
+    # INCAR settings
+    incar_settings = {"KPAR": KPAR, "NCORE": NCORE}
+
+    # Set up static calculation maker
+    static_maker = MatPesMetaGGAStaticMaker(
+        name=f"LeMatRhoStaticMaker-{mat_id}",
+    )
+
+    static_maker = update_user_incar_settings(
+        static_maker,
+        incar_settings,
+    )
+
+    static_flow = static_maker.make(structure)
+
+    # Apply config and metadata
+    static_flow.update_config({"manager_config": {"_fworker": worker}})
+    static_flow.update_metadata(metadata)
+
+    # Submit to FireWorks
+    workflow = flow_to_workflow(static_flow)
+    lpad = LaunchPad.auto_load()
+    lpad.add_wf(workflow)
+
+
+def static_calculation_off_equilibrium(
+    structure: Structure,
+    metadata: Dict[str, Any],
+    KPAR: int = 2,
+    NCORE: int = 2,
+    worker: Optional[str] = None
+) -> None:
+    """
+    Create and submit a workflow for a single static calculation using MatPES settings.
+
+    Parameters:
+        structure (Structure):
+            The pymatgen Structure object to run a static calculation on.
+        metadata (Dict[str, Any]):
+            Additional metadata for the workflow. Must include a mat_id key.
+        KPAR (int, optional):
+            K-point parallelization parameter. Default is 2.
+        NCORE (int, optional):
+            Number of cores per band calculation group. Default is 2.
+        worker (str, optional):
+            Worker identifier for the workflow manager.
+
+    Raises:
+        ValueError: If metadata is not provided.
+
+    Returns:
+        None: The workflow is submitted directly to the LaunchPad.
+    """
+    mat_id = metadata.get("mat_id")
+    if not mat_id:
+        raise ValueError("Metadata must include a 'mat_id' key.")
+
+    # INCAR settings
+    incar_settings = {"KPAR": KPAR, "NCORE": NCORE}
+
+    # Set up static calculation maker
+    static_maker = MatPesStaticFlowMaker(
+        name=f"LeMatRhoStaticMaker-{mat_id}",
+        static3=None
+    )
+
+    static_maker = update_user_incar_settings(
+        static_maker,
+        incar_settings,
+    )
+
+    static_flow = static_maker.make(structure)
+
+    # Apply config and metadata
+    static_flow.update_config({"manager_config": {"_fworker": worker}})
+    static_flow.update_metadata(metadata)
+
+    # Submit to FireWorks
+    workflow = flow_to_workflow(static_flow)
+    lpad = LaunchPad.auto_load()
+    lpad.add_wf(workflow)
