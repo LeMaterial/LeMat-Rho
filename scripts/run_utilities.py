@@ -5,7 +5,7 @@ from fireworks import LaunchPad
 import pandas as pd  # noqa: F401
 from pymatgen.core import Structure
 import numpy as np  # noqa: F401
-from typing import Literal, List, Dict, Callable, Any
+from typing import Literal, List, Dict, Callable, Any, Optional
 from run_calculation import (
     relax,
     relax_start_pbe,
@@ -15,13 +15,11 @@ from run_calculation import (
 
 """Utility functions for running calculations in batches and managing job submissions.
 The module loads the submitted mat_ids from the LaunchPad and provides functions to run calculations in batches.
-The mat_ids should be added as a user index to the launchpad and job store to ensure they can be queried efficiently.
-e.g. 
-user_indices:
-- spec.mat_id
+The mat_ids should be added as a user index to the launchpad to ensure they can be queried efficiently.
 When we know more about the setup we can think of a better solution for the ID_SET and we can implement some heuristics for NCORE, KPAR, nbands, and nkpts.
 """
-
+def get_import_string(func):
+    return func.__module__ + '.' + func.__name__
 
 def get_submitted_ids() -> set:
     """
@@ -29,14 +27,13 @@ def get_submitted_ids() -> set:
     Returns:
         set: Set of submitted mat_id strings.
     """
-    lpad = LaunchPad.auto_load()
+    lpad = LaunchPad.from_file("/home/sjonathan/atomate/config/lematrho_launchpad.yaml")
     query_filter = {"spec.mat_id": {"$exists": True}}
     return_fields = {"spec.mat_id": 1, "_id": 0}
     results = lpad.fireworks.find(query_filter, return_fields)
     mat_ids = {result["spec"]["mat_id"] for result in results if "spec" in result and "mat_id" in result["spec"]}
     return mat_ids
 
-global ID_SET
 ID_SET = get_submitted_ids()
 print(f"Found {len(ID_SET)} submitted mat_ids in LaunchPad.")
 
@@ -47,7 +44,6 @@ def get_mat_ids_successful_jobs(
         "LeMatRhoStaticMaker",
         "LeMatRhoPreStaticMaker",
         "LeMatRhoRelaxMaker",
-        None,  # Allow None for flexibility
     ] = "LeMatRhoStaticMaker",
 ) -> List[str]:
     """
@@ -60,9 +56,8 @@ def get_mat_ids_successful_jobs(
     """
     query_filter = {
         "metadata.mat_id": {"$exists": True},
+        "name": {"$regex": calc_type},
     }
-    if calc_type:
-        query_filter["metadata.calc_type"] = calc_type
     docs = list(store.query(query_filter, properties=["metadata", "name"]))
     mat_ids = [doc["metadata"]["mat_id"] for doc in docs]
     return mat_ids
@@ -78,6 +73,7 @@ def run_batch(
     nkpts: List[int],
     ignore_memory_check: bool = False,
     worker: str = None,
+    launchpad_path: Optional[str] = None,
 ) -> None:
     """
     Run a batch of calculations.
@@ -93,6 +89,7 @@ def run_batch(
         nkpts (List[int]): List of nkpts values for the batch.
         ignore_memory_check (bool, optional): If True, skip the memory check. Default is False.
         worker (str, optional): Worker identifier for the workflow manager.
+        launchpad_path (Optional[str], optional): Path to the LaunchPad database. If not provided, it will use the default settings.
 
     Returns:
         None
@@ -114,12 +111,14 @@ def run_batch(
             continue
         if mat_id not in ID_SET:
             metadata["batch_metadata"] = batch_metadata
+            metadata["calc_func"] = get_import_string(calc_func)
             calc_func(
                 struct,
                 metadata=metadata,
                 NCORE=ncore,
                 KPAR=kpar,
                 worker=worker,
+                launchpad_path=launchpad_path,
             )
             ID_SET.add(mat_id)
         else:

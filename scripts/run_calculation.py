@@ -7,16 +7,18 @@ from atomate2.vasp.flows.core import DoubleRelaxMaker
 from atomate2.vasp.jobs.mp import MPMetaGGARelaxMaker
 from atomate2.vasp.jobs.matpes import MatPesMetaGGAStaticMaker, MatPesGGAStaticMaker
 from typing import Optional, Dict, Any
-from atomate2.vasp.powerups import update_user_incar_settings
+from atomate2.vasp.powerups import update_user_incar_settings, update_vasp_custodian_handlers
 from pymatgen.core import Structure
 from jobflow import Flow
+from custodian.vasp.handlers import FrozenJobErrorHandler
 
 """Create and submit a workflow for relaxing a crystal structure using MatPES settings.
 Important to set one consistent worker type for all calculations of a workflow due to copying of WAVECAR (requires same number of Cores with Ncore).
-Three functions are provided:
+Four functions are provided:
 1. relax: for double relaxation followed by a static calculation.
-2. static: for a single static calculation.
-3. static_off_equilibrium: Usually off-equilibrium structures are harder to converge,
+2  relax_start_pbe: for a static PBE calculation followed by an R2SCAN static calculation double relaxation followed by an R2SCAN static calculation.
+3. static: for a single static calculation.
+4. static_off_equilibrium: Usually off-equilibrium structures are harder to converge,
 so this first does a PBE static calculation, then a meta-GGA static calculation.
 update LargeSigmaHandler line 1427 with
             actions.append(
@@ -33,7 +35,8 @@ def relax(
     metadata: Dict[str, Any],
     KPAR: int = 2,
     NCORE: int = 2,
-    worker: Optional[str] = None
+    worker: Optional[str] = None,
+    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for relaxing a crystal structure using a double relaxation
@@ -51,7 +54,8 @@ def relax(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-
+        launchpad_path (str, optional):
+            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If mat_id is not provided in metadata.
 
@@ -74,18 +78,18 @@ def relax(
     })
     # Setup relaxation makers
     relax_maker_1 = MatPesMetaGGAStaticMaker(
-        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        name=f"LeMatRhoRelaxMaker",
         task_document_kwargs={"store_trajectory": True}
     )
 
     relax_maker_2 = MPMetaGGARelaxMaker(
-        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        name=f"LeMatRhoRelaxMaker",
         copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
         task_document_kwargs={"store_trajectory": True}
     )
 
     double_relax_maker = DoubleRelaxMaker(
-        name=f"LeMatRhoDoubleRelaxMaker-{mat_id}",
+        name=f"LeMatRhoDoubleRelaxMaker",
         relax_maker1=relax_maker_1,
         relax_maker2=relax_maker_2
     )
@@ -95,7 +99,7 @@ def relax(
     )
 
     static_maker = MatPesMetaGGAStaticMaker(
-        name=f"LeMatRhoStaticMaker-{mat_id}",
+        name=f"LeMatRhoStaticMaker",
         copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
     )
     static_maker = update_user_incar_settings(
@@ -103,7 +107,7 @@ def relax(
         incar_settings,
     )
     relax_workflow_maker = MPMetaGGADoubleRelaxStaticMaker(
-        name=f"LeMatRhoDoubleRelaxStaticMaker-{mat_id}",
+        name=f"LeMatRhoDoubleRelaxStaticMaker",
         relax_maker=double_relax_maker,
         static_maker=static_maker
     )
@@ -113,10 +117,12 @@ def relax(
     # Set worker and metadata, most likely separate workers for different Nbands
     relax_flow.update_config({"manager_config": {"_fworker": worker}})
     relax_flow.update_metadata(metadata)
-
     # Convert flow to Fireworks workflow and submit to db
     workflow = flow_to_workflow(relax_flow)
-    lpad = LaunchPad.auto_load()
+    if launchpad_path:
+        lpad = LaunchPad.from_file(launchpad_path)
+    else:
+        lpad = LaunchPad.auto_load()
     lpad.add_wf(workflow)
 
 
@@ -125,7 +131,8 @@ def relax_start_pbe(
     metadata: Dict[str, Any],
     KPAR: int = 2,
     NCORE: int = 2,
-    worker: Optional[str] = None
+    worker: Optional[str] = None,
+    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for relaxing a crystal structure using a 
@@ -144,7 +151,8 @@ def relax_start_pbe(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-
+        launchpad_path (str, optional):
+            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If mat_id is not provided in metadata.
 
@@ -171,7 +179,7 @@ def relax_start_pbe(
         "LWAVE": True,
     })
     pre_static_maker = MatPesGGAStaticMaker(
-        name=f"LeMatRhoPreStaticMaker-{mat_id}"
+        name=f"LeMatRhoPreStaticMaker"
     )
     pre_static_maker = update_user_incar_settings(
         pre_static_maker,
@@ -179,19 +187,19 @@ def relax_start_pbe(
     )
 
     relax_maker_1 = MatPesMetaGGAStaticMaker(
-        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        name=f"LeMatRhoRelaxMaker",
         task_document_kwargs={"store_trajectory": True},
         copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
     )
 
     relax_maker_2 = MPMetaGGARelaxMaker(
-        name=f"LeMatRhoRelaxMaker-{mat_id}",
+        name=f"LeMatRhoRelaxMaker",
         copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
         task_document_kwargs={"store_trajectory": True},
     )
 
     double_relax_maker = DoubleRelaxMaker(
-        name=f"LeMatRhoDoubleRelaxMaker-{mat_id}",
+        name=f"LeMatRhoDoubleRelaxMaker",
         relax_maker1=relax_maker_1,
         relax_maker2=relax_maker_2
     )
@@ -201,7 +209,7 @@ def relax_start_pbe(
     )
 
     static_maker = MatPesMetaGGAStaticMaker(
-        name=f"LeMatRhoStaticMaker-{mat_id}",
+        name=f"LeMatRhoStaticMaker",
         copy_vasp_kwargs={"additional_vasp_files": ("WAVECAR", "CHGCAR")},
     )
     static_maker = update_user_incar_settings(
@@ -209,7 +217,7 @@ def relax_start_pbe(
         incar_settings,
     )
     relax_workflow_maker = MPMetaGGADoubleRelaxStaticMaker(
-        name=f"LeMatRhoDoubleRelaxStaticMaker-{mat_id}",
+        name=f"LeMatRhoDoubleRelaxStaticMaker",
         relax_maker=double_relax_maker,
         static_maker=static_maker,
     )
@@ -226,7 +234,10 @@ def relax_start_pbe(
 
     # Convert flow to Fireworks workflow and submit to db
     workflow = flow_to_workflow(complete_flow)
-    lpad = LaunchPad.auto_load()
+    if launchpad_path:
+        lpad = LaunchPad.from_file(launchpad_path)
+    else:
+        lpad = LaunchPad.auto_load()
     lpad.add_wf(workflow)
 
 
@@ -235,7 +246,8 @@ def static_calculation(
     metadata: Dict[str, Any],
     KPAR: int = 2,
     NCORE: int = 2,
-    worker: Optional[str] = None
+    worker: Optional[str] = None,
+    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for a single static calculation using MatPES settings.
@@ -251,6 +263,8 @@ def static_calculation(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
+        launchpad_path (str, optional):
+            Path to the LaunchPad database. If not provided, it will use the default settings.
 
     Raises:
         ValueError: If metadata is not provided.
@@ -267,7 +281,7 @@ def static_calculation(
 
     # Set up static calculation maker
     static_maker = MatPesMetaGGAStaticMaker(
-        name=f"LeMatRhoStaticMaker-{mat_id}",
+        name=f"LeMatRhoStaticMaker",
     )
 
     static_maker = update_user_incar_settings(
@@ -283,7 +297,10 @@ def static_calculation(
 
     # Submit to FireWorks
     workflow = flow_to_workflow(static_flow)
-    lpad = LaunchPad.auto_load()
+    if launchpad_path:
+        lpad = LaunchPad.from_file(launchpad_path)
+    else:
+        lpad = LaunchPad.auto_load()
     lpad.add_wf(workflow)
 
 
@@ -292,7 +309,8 @@ def static_calculation_off_equilibrium(
     metadata: Dict[str, Any],
     KPAR: int = 2,
     NCORE: int = 2,
-    worker: Optional[str] = None
+    worker: Optional[str] = None,
+    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for a single static calculation using MatPES settings.
@@ -308,7 +326,8 @@ def static_calculation_off_equilibrium(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-
+        launchpad_path (str, optional):
+            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If metadata is not provided.
 
@@ -324,7 +343,7 @@ def static_calculation_off_equilibrium(
 
     # Set up static calculation maker
     static_maker = MatPesStaticFlowMaker(
-        name=f"LeMatRhoStaticMaker-{mat_id}",
+        name=f"LeMatRhoStaticMaker",
         static3=None
     )
 
@@ -341,5 +360,8 @@ def static_calculation_off_equilibrium(
 
     # Submit to FireWorks
     workflow = flow_to_workflow(static_flow)
-    lpad = LaunchPad.auto_load()
+    if launchpad_path:
+        lpad = LaunchPad.from_file(launchpad_path)
+    else:
+        lpad = LaunchPad.auto_load()
     lpad.add_wf(workflow)
