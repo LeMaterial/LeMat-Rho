@@ -8,6 +8,8 @@ dependencies = [
     "ase>=3.25.0",
     "ipykernel>=6.29.5",
     "material-hasher",
+    "atomate2",
+    "fireworks",
 ]
 
 [tool.uv.sources]
