@@ -10,7 +10,6 @@ from run_calculation import (
     relax,
     relax_start_pbe,
     static_calculation,
-    static_calculation_off_equilibrium,
 )
 
 """Utility functions for running calculations in batches and managing job submissions.
@@ -102,14 +101,13 @@ def run_batch(
             "The memory demands of the calculations are not roughly equal. "
             "Please check the nbands and nkpts values."
         )
-
-    global ID_SET  # In case you want to update the global set after each submission
-
+    global ID_SET  
     for struct, metadata in zip(structure_list, metadata_list):
         mat_id = metadata.get("mat_id")
         if not mat_id:
             continue
         if mat_id not in ID_SET:
+            print(f"Running {mat_id}...")
             metadata["batch_metadata"] = batch_metadata
             metadata["calc_func"] = get_import_string(calc_func)
             calc_func(
