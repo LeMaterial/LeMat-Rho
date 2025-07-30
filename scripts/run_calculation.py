@@ -358,10 +358,4 @@ def static_calculation_off_equilibrium(
     static_flow.update_config({"manager_config": {"_fworker": worker}})
     static_flow.update_metadata(metadata)
 
-    # Submit to FireWorks
-    workflow = flow_to_workflow(static_flow)
-    if launchpad_path:
-        lpad = LaunchPad.from_file(launchpad_path)
-    else:
-        lpad = LaunchPad.auto_load()
-    lpad.add_wf(workflow)
+    # Submit to JobFlow
