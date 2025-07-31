@@ -8,15 +8,14 @@ from atomate2.vasp.powerups import update_user_incar_settings, update_vasp_custo
 from pymatgen.core import Structure
 from custodian.vasp.handlers import FrozenJobErrorHandler
 
-from jobflow import SETTINGS
-from jobflow import Flow
+from jobflow import Flow, job, SETTINGS
 from jobflow.managers.local import run_locally
 
 import boto3
 from botocore.exceptions import ClientError
 
 from typing import Optional, Dict, Any
-
+from pathlib import Path
 
 
 """Create and submit a workflow for relaxing a crystal structure using MatPES settings.
@@ -36,14 +35,14 @@ update LargeSigmaHandler line 1427 with
             )
 """
 
-
 @job
 def boto_insert(file_path: str, 
+                metadata: Dict[str, Any],
                 bucket_name: str,
                 aws_access_key_id: Optional[str] = None, 
                 aws_secret_access_key: Optional[str] = None, 
                 region_name: Optional[str] = None,
-                skip_files: Optional[list] = []) -> Any:
+                skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
     """
     Inserts Completed VASP calculations into AWS S3 bucket.
 
@@ -75,12 +74,15 @@ def boto_insert(file_path: str,
         config=Config(signature_version='s3v4')
     )
 
+    mat_id = metadata.get("mat_id", None)
     for f in glob.glob(os.path.join(file_path, '*')):
-        if f.split('/')[-1] in skip_files:
+        fname = f.split('/')[-1].replace('.gz', '')
+        if fname in skip_files:
             continue
+        fkey = os.path.join(mat_id, f)
         with open(f, 'rb') as body:
-            s3.put_object(Bucket=bucket_name, Body=body, Key=f)
-        print(f"File '{f}' uploaded to s3://{bucket_name}/{f}")
+            s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
+        print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
 
 
 def relax(
@@ -89,7 +91,6 @@ def relax(
     KPAR: int = 2,
     NCORE: int = 2,
     worker: Optional[str] = None,
-    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for relaxing a crystal structure using a double relaxation
@@ -107,8 +108,6 @@ def relax(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If mat_id is not provided in metadata.
 
@@ -171,11 +170,8 @@ def relax(
     relax_flow.update_config({"manager_config": {"_fworker": worker}})
     relax_flow.update_metadata(metadata)
 
-    # job to insert data into AWS S3
-    boto_job = boto_insert()
-
      # Submit to JobFlow locally
-    run_locally([relax_flow, boto_job])
+    run_locally([relax_flow])
 
 
 def relax_start_pbe(
@@ -184,7 +180,6 @@ def relax_start_pbe(
     KPAR: int = 2,
     NCORE: int = 2,
     worker: Optional[str] = None,
-    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for relaxing a crystal structure using a 
@@ -203,8 +198,6 @@ def relax_start_pbe(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If mat_id is not provided in metadata.
 
@@ -284,11 +277,8 @@ def relax_start_pbe(
     complete_flow.update_config({"manager_config": {"_fworker": worker}})
     complete_flow.update_metadata(metadata)
 
-    # job to insert data into AWS S3
-    boto_job = boto_insert()
-
      # Submit to JobFlow locally
-    run_locally([complete_flow, boto_job])
+    run_locally([complete_flow])
 
 
 def static_calculation(
@@ -297,7 +287,6 @@ def static_calculation(
     KPAR: int = 2,
     NCORE: int = 2,
     worker: Optional[str] = None,
-    launchpad_path: Optional[str] = None
 ) -> None:
     """
     Create and submit a workflow for a single static calculation using MatPES settings.
@@ -313,8 +302,6 @@ def static_calculation(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
 
     Raises:
         ValueError: If metadata is not provided.
@@ -344,12 +331,8 @@ def static_calculation(
     # Apply config and metadata
     static_flow.update_config({"manager_config": {"_fworker": worker}})
     static_flow.update_metadata(metadata)
-
-    # job to insert data into AWS S3
-    boto_job = boto_insert()
-
      # Submit to JobFlow locally
-    run_locally([static_flow, boto_job])
+    run_locally([static_flow])
 
 
 
@@ -359,7 +342,10 @@ def static_calculation_off_equilibrium(
     KPAR: int = 2,
     NCORE: int = 2,
     worker: Optional[str] = None,
-    launchpad_path: Optional[str] = None
+    bucket_name: Optional[str] = None,
+    aws_access_key_id: Optional[str] = None, 
+    aws_secret_access_key: Optional[str] = None, 
+    region_name: Optional[str] = None,
 ) -> None:
     """
     Create and submit a workflow for a single static calculation using MatPES settings.
@@ -375,8 +361,6 @@ def static_calculation_off_equilibrium(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If metadata is not provided.
 
@@ -408,7 +392,8 @@ def static_calculation_off_equilibrium(
     static_flow.update_metadata(metadata)
 
     # job to insert data into AWS S3
-    boto_job = boto_insert()
+
+    boto_job = boto_insert(Path.cwd(),  bucket_name, aws_access_key_id, aws_secret_access_key, region_name)
 
      # Submit to JobFlow locally
     run_locally([static_flow, boto_job])
