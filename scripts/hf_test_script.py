@@ -40,8 +40,8 @@ if __name__=="__main__":
     s = Structure.from_file(os.path.join(file_path, 'CONTCAR.gz'))
 
     metadata = {'mat_id': fwjson['name'].split('-')[-1]}
-
+    print(metadata, type(metadata), metadata.get('mat_id'))
 
     run_calc = relax_start_pbe(s, metadata)
-    boto_job = boto_insert(file_path, metadata, bucket_name, aws_access_key_id, aws_secret_access_key, region_name)
+    boto_job = boto_insert(metadata, file_path, bucket_name, aws_access_key_id, aws_secret_access_key, region_name)
     run_locally([run_calc, boto_job])

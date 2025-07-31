@@ -37,6 +37,7 @@ def boto_insert(
     region_name::
         name of region e.g. us-north-1    
     """
+    print('HEY LOOK METADATA HERE ', type(metadata), metadata)
 
     session = botocore.session.get_session()
     
@@ -51,7 +52,7 @@ def boto_insert(
 
     file_path = Path.cwd() if not file_path else file_path
     mat_id = metadata.get("mat_id", None)
-    
+
     for f in glob.glob(os.path.join(file_path, '*')):
         fname = f.split('/')[-1].replace('.gz', '')
         if fname in skip_files:
