@@ -41,7 +41,7 @@ def boto_insert(
     """
 
     print('inserting the following PATH: %s' %(Path.cwd()))
-    json.dump(vasp_job.to_json(), open('%s.json' %(vasp_job.name), 'w'))
+    json.dump(str(vasp_job.to_json()), open('%s.json' %(vasp_job.name), 'w'))
     session = botocore.session.get_session()
     
     # Create S3 client with credentials
