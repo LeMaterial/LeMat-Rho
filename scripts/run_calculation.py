@@ -38,27 +38,49 @@ update LargeSigmaHandler line 1427 with
 
 
 @job
-def boto_insert(dir_name: str, bucket_name: str, 
-    s3_prefix: Optional[str] = "", aws_access_key_id: Optional[str] = None, 
-    aws_secret_access_key: Optional[str] = None) -> Any:
-    """Inserts Completed VASP calculations into AWS S3 bucket."""
-    # copy from examples.py
+def boto_insert(file_path: str, 
+                bucket_name: str,
+                aws_access_key_id: Optional[str] = None, 
+                aws_secret_access_key: Optional[str] = None, 
+                region_name: Optional[str] = None,
+                skip_files: Optional[list] = []) -> Any:
+    """
+    Inserts Completed VASP calculations into AWS S3 bucket.
 
-    # Use S3 client
-    s3_client = boto3.client('s3')
+    file_path:: 
+        directory of the VASP outputs
+    bucket_name:: 
+        name of the bucket
+    object_key:: 
+        string of text to be append to the front of the file, otherwise 
+            the key will just be the full directory. e.g. 
+            /path/to/VASP/calculation/CHGCAR is the Key if no object_key
+            is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
+    aws_access_key_id::
+        aws access key
+    aws_secret_access_key::
+        aws secret access key
+    region_name::
+        name of region e.g. us-north-1    
+    """
 
-    for root, _, files in os.walk(local_directory):
-        for filename in files:
-            # Full local path
-            local_path = os.path.join(root, filename)
-            # Relative path for S3 key
-            relative_path = os.path.relpath(local_path, local_directory)
-            s3_key = os.path.join(s3_prefix, relative_path).replace("\\", "/")
-            try:
-                s3_client.upload_file(local_path, bucket_name, s3_key)
-                print(f"Uploaded: {local_path} to s3://{bucket_name}/{s3_key}")
-            except ClientError as e:
-                print(f"Failed to upload {local_path}: {e}")
+    session = botocore.session.get_session()
+    
+    # Create S3 client with credentials
+    s3 = session.create_client(
+        's3',
+        region_name=region_name,
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        config=Config(signature_version='s3v4')
+    )
+
+    for f in glob.glob(os.path.join(file_path, '*')):
+        if f.split('/')[-1] in skip_files:
+            continue
+        with open(f, 'rb') as body:
+            s3.put_object(Bucket=bucket_name, Body=body, Key=f)
+        print(f"File '{f}' uploaded to s3://{bucket_name}/{f}")
 
 
 def relax(
