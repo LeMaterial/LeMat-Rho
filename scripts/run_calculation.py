@@ -1,16 +1,23 @@
-from jobflow import SETTINGS
-from fireworks import LaunchPad
-from jobflow.managers.fireworks import flow_to_workflow
 from atomate2.vasp.flows.mp import MPMetaGGADoubleRelaxStaticMaker
 from atomate2.vasp.flows.matpes import MatPesStaticFlowMaker
 from atomate2.vasp.flows.core import DoubleRelaxMaker
 from atomate2.vasp.jobs.mp import MPMetaGGARelaxMaker
 from atomate2.vasp.jobs.matpes import MatPesMetaGGAStaticMaker, MatPesGGAStaticMaker
-from typing import Optional, Dict, Any
 from atomate2.vasp.powerups import update_user_incar_settings, update_vasp_custodian_handlers
+
 from pymatgen.core import Structure
-from jobflow import Flow
 from custodian.vasp.handlers import FrozenJobErrorHandler
+
+from jobflow import SETTINGS
+from jobflow import Flow
+from jobflow.managers.local import run_locally
+
+import boto3
+from botocore.exceptions import ClientError
+
+from typing import Optional, Dict, Any
+
+
 
 """Create and submit a workflow for relaxing a crystal structure using MatPES settings.
 Important to set one consistent worker type for all calculations of a workflow due to copying of WAVECAR (requires same number of Cores with Ncore).
@@ -28,6 +35,29 @@ update LargeSigmaHandler line 1427 with
                 }
             )
 """
+
+
+@job
+def boto_insert(dir_name: str, bucket_name: str, 
+    s3_prefix: Optional[str] = "", aws_access_key_id: Optional[str] = None, 
+    aws_secret_access_key: Optional[str] = None) -> Any:
+    """Inserts Completed VASP calculations into AWS S3 bucket."""
+
+    # Use S3 client
+    s3_client = boto3.client('s3')
+
+    for root, _, files in os.walk(local_directory):
+        for filename in files:
+            # Full local path
+            local_path = os.path.join(root, filename)
+            # Relative path for S3 key
+            relative_path = os.path.relpath(local_path, local_directory)
+            s3_key = os.path.join(s3_prefix, relative_path).replace("\\", "/")
+            try:
+                s3_client.upload_file(local_path, bucket_name, s3_key)
+                print(f"Uploaded: {local_path} to s3://{bucket_name}/{s3_key}")
+            except ClientError as e:
+                print(f"Failed to upload {local_path}: {e}")
 
 
 def relax(
@@ -117,13 +147,12 @@ def relax(
     # Set worker and metadata, most likely separate workers for different Nbands
     relax_flow.update_config({"manager_config": {"_fworker": worker}})
     relax_flow.update_metadata(metadata)
-    # Convert flow to Fireworks workflow and submit to db
-    workflow = flow_to_workflow(relax_flow)
-    if launchpad_path:
-        lpad = LaunchPad.from_file(launchpad_path)
-    else:
-        lpad = LaunchPad.auto_load()
-    lpad.add_wf(workflow)
+
+    # job to insert data into AWS S3
+    boto_job = boto_insert()
+
+     # Submit to JobFlow locally
+    run_locally([relax_flow, boto_job])
 
 
 def relax_start_pbe(
@@ -232,13 +261,11 @@ def relax_start_pbe(
     complete_flow.update_config({"manager_config": {"_fworker": worker}})
     complete_flow.update_metadata(metadata)
 
-    # Convert flow to Fireworks workflow and submit to db
-    workflow = flow_to_workflow(complete_flow)
-    if launchpad_path:
-        lpad = LaunchPad.from_file(launchpad_path)
-    else:
-        lpad = LaunchPad.auto_load()
-    lpad.add_wf(workflow)
+    # job to insert data into AWS S3
+    boto_job = boto_insert()
+
+     # Submit to JobFlow locally
+    run_locally([complete_flow, boto_job])
 
 
 def static_calculation(
@@ -295,13 +322,12 @@ def static_calculation(
     static_flow.update_config({"manager_config": {"_fworker": worker}})
     static_flow.update_metadata(metadata)
 
-    # Submit to FireWorks
-    workflow = flow_to_workflow(static_flow)
-    if launchpad_path:
-        lpad = LaunchPad.from_file(launchpad_path)
-    else:
-        lpad = LaunchPad.auto_load()
-    lpad.add_wf(workflow)
+    # job to insert data into AWS S3
+    boto_job = boto_insert()
+
+     # Submit to JobFlow locally
+    run_locally([static_flow, boto_job])
+
 
 
 def static_calculation_off_equilibrium(
@@ -358,4 +384,8 @@ def static_calculation_off_equilibrium(
     static_flow.update_config({"manager_config": {"_fworker": worker}})
     static_flow.update_metadata(metadata)
 
-    # Submit to JobFlow
+    # job to insert data into AWS S3
+    boto_job = boto_insert()
+
+     # Submit to JobFlow locally
+    run_locally([static_flow, boto_job])
