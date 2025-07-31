@@ -19,13 +19,6 @@ Four functions are provided:
 3. static: for a single static calculation.
 4. static_off_equilibrium: Usually off-equilibrium structures are harder to converge,
 so this first does a PBE static calculation, then a meta-GGA static calculation.
-update LargeSigmaHandler line 1427 with
-            actions.append(
-                {
-                    "dict": "INCAR",
-                    "action": {"_set": {"ICHARG": 1}},
-                }
-            )
 """
 
 #Adjustments to MATPES INCAR settings
