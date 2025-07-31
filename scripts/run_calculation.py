@@ -13,9 +13,14 @@ from jobflow.managers.local import run_locally
 
 import boto3
 from botocore.exceptions import ClientError
+import botocore.session
+from botocore.client import Config
 
 from typing import Optional, Dict, Any
 from pathlib import Path
+
+import glob, os
+
 
 
 """Create and submit a workflow for relaxing a crystal structure using MatPES settings.
