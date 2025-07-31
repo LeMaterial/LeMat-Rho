@@ -37,8 +37,8 @@ def boto_insert(
     region_name::
         name of region e.g. us-north-1    
     """
-    print('HEY LOOK METADATA HERE ', type(metadata), metadata)
-
+    
+    print('inserting the following PATH: %s' %(Path.cwd()))
     session = botocore.session.get_session()
     
     # Create S3 client with credentials

@@ -36,11 +36,8 @@ if __name__=="__main__":
     aws_secret_access_key = args.aws_secret_access_key
     region_name = args.region_name
 
-    fwjson = json.load(open(os.path.join(file_path, 'FW.json'), 'r'))
-    s = Structure.from_file(os.path.join(file_path, 'CONTCAR.gz'))
-
-    metadata = {'mat_id': fwjson['name'].split('-')[-1]}
-    print(metadata, type(metadata), metadata.get('mat_id'))
+    s = Structure.from_file('Li.cif')
+    metadata = {'mat_id': 'Li_test'}
 
     run_calc = relax_start_pbe(s, metadata)
     boto_job = boto_insert(metadata, file_path, bucket_name, aws_access_key_id, aws_secret_access_key, region_name)
