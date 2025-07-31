@@ -84,7 +84,7 @@ def boto_insert(file_path: str,
         fname = f.split('/')[-1].replace('.gz', '')
         if fname in skip_files:
             continue
-        fkey = os.path.join(mat_id, f.split('/')[-2:])
+        fkey = os.path.join(mat_id, f.split('/')[-2:][0], f.split('/')[-2:][1])
         with open(f, 'rb') as body:
             s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
         print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
