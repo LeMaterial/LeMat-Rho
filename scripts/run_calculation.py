@@ -42,6 +42,7 @@ def boto_insert(dir_name: str, bucket_name: str,
     s3_prefix: Optional[str] = "", aws_access_key_id: Optional[str] = None, 
     aws_secret_access_key: Optional[str] = None) -> Any:
     """Inserts Completed VASP calculations into AWS S3 bucket."""
+    # copy from examples.py
 
     # Use S3 client
     s3_client = boto3.client('s3')
