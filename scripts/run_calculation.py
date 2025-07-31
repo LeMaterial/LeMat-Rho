@@ -284,11 +284,6 @@ def static_calculation_off_equilibrium(
     metadata: Dict[str, Any],
     KPAR: int = 2,
     NCORE: int = 2,
-    worker: Optional[str] = None,
-    bucket_name: Optional[str] = None,
-    aws_access_key_id: Optional[str] = None, 
-    aws_secret_access_key: Optional[str] = None, 
-    region_name: Optional[str] = None,
 ) -> None:
     """
     Create and submit a workflow for a single static calculation using MatPES settings.

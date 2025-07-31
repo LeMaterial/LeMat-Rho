@@ -10,9 +10,10 @@ from typing import Optional, Dict, Any
 
 
 @job
-def boto_insert(file_path: str, 
+def boto_insert(
                 metadata: Dict[str, Any],
                 bucket_name: str,
+                file_path: Optional[str] = None, 
                 aws_access_key_id: Optional[str] = None, 
                 aws_secret_access_key: Optional[str] = None, 
                 region_name: Optional[str] = None,
@@ -48,7 +49,9 @@ def boto_insert(file_path: str,
         config=Config(signature_version='s3v4')
     )
 
+    file_path = Path.cwd() if not file_path else file_path
     mat_id = metadata.get("mat_id", None)
+    
     for f in glob.glob(os.path.join(file_path, '*')):
         fname = f.split('/')[-1].replace('.gz', '')
         if fname in skip_files:
