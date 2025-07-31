@@ -5,12 +5,13 @@ from botocore.client import Config
 import glob, os
 from pathlib import Path
 
-from jobflow import job
+from jobflow import job, Job
 from typing import Optional, Dict, Any
 
 
 @job
 def boto_insert(
+                vasp_job: Job,
                 metadata: Dict[str, Any],
                 bucket_name: str,
                 file_path: Optional[str] = None, 
@@ -37,8 +38,9 @@ def boto_insert(
     region_name::
         name of region e.g. us-north-1    
     """
-    
+
     print('inserting the following PATH: %s' %(Path.cwd()))
+    json.dump(vasp_job.to_json(), open('%s.json' %(vasp_job.name), 'w'))
     session = botocore.session.get_session()
     
     # Create S3 client with credentials
