@@ -284,6 +284,7 @@ def static_calculation_off_equilibrium(
     metadata: Dict[str, Any],
     KPAR: int = 2,
     NCORE: int = 2,
+    worker: Optional[str] = None,
 ) -> None:
     """
     Create and submit a workflow for a single static calculation using MatPES settings.
