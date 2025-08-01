@@ -31,6 +31,8 @@ def read_options():
                         help="partition")
     parser.add_argument("-c", "--cpus_per_task", dest="cpus_per_task", type=str, 
                         help="cpus_per_task")
+    parser.add_argument("-e", "--env_command", dest="env_command", type=str, 
+                        help="Location of file to activate environment")
     
     args = parser.parse_args()
 
@@ -49,6 +51,7 @@ if __name__=="__main__":
     logdir = args.logdir
     partition = args.partition
     cpus_per_task = args.cpus_per_task
+    env_command = args.env_command
 
     metadata_batch = json.load(open(batch_file, 'r'))
 
@@ -70,6 +73,7 @@ if __name__=="__main__":
             # sbatch_args={
             #     "mem-per-cpu": "1950M"
             # },
+            env_command='source %s' %(env_command),
             cpus_per_task=cpus_per_task,
             tasks=1,
             max_array_launch_parallel=True,
