@@ -28,7 +28,7 @@ def read_options():
                         help="Directory to log outputs")
     parser.add_argument("-p", "--partition", dest="partition", type=str, 
                         help="partition")
-    parser.add_argument("-p", "--cpus_per_task", dest="cpus_per_task", type=str, 
+    parser.add_argument("-c", "--cpus_per_task", dest="cpus_per_task", type=str, 
                         help="cpus_per_task")
     
     args = parser.parse_args()
