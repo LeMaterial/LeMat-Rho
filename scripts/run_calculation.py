@@ -8,7 +8,7 @@ from atomate2.vasp.powerups import update_user_incar_settings, update_vasp_custo
 from pymatgen.core import Structure
 from custodian.vasp.handlers import FrozenJobErrorHandler
 
-from jobflow import Flow, SETTINGS
+from jobflow import Flow, SETTINGS, Response, job
 
 from typing import Optional, Dict, Any
 
@@ -122,7 +122,7 @@ def relax(
 
     return relax_flow
 
-
+@job
 def relax_start_pbe(
     structure: Structure,
     metadata: Dict[str, Any],
@@ -228,7 +228,7 @@ def relax_start_pbe(
     complete_flow.update_config({"manager_config": {"_fworker": worker}})
     complete_flow.update_metadata(metadata)
 
-    return complete_flow
+    return Response(addition=complete_flow, output=relax_flow.output.dir_name)
 
 
 def static_calculation(

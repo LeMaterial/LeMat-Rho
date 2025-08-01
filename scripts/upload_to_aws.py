@@ -12,10 +12,9 @@ from jobflow import job, Job
 
 @job
 def boto_insert(
-                vasp_job: Job,
+                vasp_job: str,
                 metadata: Dict[str, Any],
                 bucket_name: str,
-                file_path: Optional[str] = None, 
                 aws_access_key_id: Optional[str] = None, 
                 aws_secret_access_key: Optional[str] = None, 
                 region_name: Optional[str] = None,
@@ -40,8 +39,7 @@ def boto_insert(
         name of region e.g. us-north-1    
     """
 
-    print('inserting the following PATH: %s' %(Path.cwd()))
-    json.dump(str(vasp_job.to_json()), open('%s.json' %(vasp_job.name), 'w'))
+    file_path = vasp_job.split(':')[-1]
     session = botocore.session.get_session()
     
     # Create S3 client with credentials
@@ -53,7 +51,6 @@ def boto_insert(
         config=Config(signature_version='s3v4')
     )
 
-    file_path = Path.cwd() if not file_path else file_path
     mat_id = metadata.get("mat_id", None)
 
     for f in glob.glob(os.path.join(file_path, '*')):
@@ -64,4 +61,3 @@ def boto_insert(
         with open(f, 'rb') as body:
             s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
         print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
-
