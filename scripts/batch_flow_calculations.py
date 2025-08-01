@@ -34,16 +34,16 @@ class RunChgcarWF(PipelineStep):
 
         for filename in filenames:
 
-        s = Structure(
-        lattice=[x for y in filename["lattice_vectors"] for x in y],
-        species=filename["species_at_sites"],
-        coords=filename["cartesian_site_positions"],
-        coords_are_cartesian=True,
-        )
+            s = Structure(
+            lattice=[x for y in filename["lattice_vectors"] for x in y],
+            species=filename["species_at_sites"],
+            coords=filename["cartesian_site_positions"],
+            coords_are_cartesian=True,
+            )
 
-        run_calc = relax_start_pbe(s, filename)
-        boto_job = boto_insert(run_calc.output, self.bucket_name, 
-                                self.aws_access_key_id, self.aws_secret_access_key, 
-                                self.region_name)
+            run_calc = relax_start_pbe(s, filename)
+            boto_job = boto_insert(run_calc.output, self.bucket_name, 
+                                    self.aws_access_key_id, self.aws_secret_access_key, 
+                                    self.region_name)
 
-        run_locally([run_calc, boto_job], create_folders=True)
+            run_locally([run_calc, boto_job], create_folders=True)
