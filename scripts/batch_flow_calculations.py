@@ -28,14 +28,14 @@ class RunChgcarWF(PipelineStep):
     def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
 
         s = Structure(
-        lattice=[x for y in metadata["lattice_vectors"] for x in y],
-        species=metadata["species_at_sites"],
-        coords=metadata["cartesian_site_positions"],
+        lattice=[x for y in self.metadata["lattice_vectors"] for x in y],
+        species=self.metadata["species_at_sites"],
+        coords=self.metadata["cartesian_site_positions"],
         coords_are_cartesian=True,
         )
 
-        run_calc = relax_start_pbe(s, metadata)
-        boto_job = boto_insert(run_calc.output, metadata, self.bucket_name, 
+        run_calc = relax_start_pbe(s, self.metadata)
+        boto_job = boto_insert(run_calc.output, self.metadata, self.bucket_name, 
                                 self.aws_access_key_id, self.aws_secret_access_key, 
                                 self.region_name)
 
