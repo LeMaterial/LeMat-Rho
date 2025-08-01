@@ -74,7 +74,3 @@ if __name__=="__main__":
             max_array_launch_parallel=True,
             time="03:00:00",
         ).run()
-
-        wf = RunChgcarWF()
-        wf.
-
