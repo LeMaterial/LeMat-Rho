@@ -52,23 +52,3 @@ if __name__=="__main__":
 
     run_locally([runmult_job], create_folders=True)
 
-
-    SlurmPipelineExecutor(
-        pipeline=[
-            BaderData(
-                aeccar0_folder="s3://materialsproject-parsed/aeccar0s",
-                aeccar2_folder="s3://materialsproject-parsed/aeccar2s",
-                chgcar_folder="s3://materialsproject-parsed/chgcars",
-                perl_chgcar_file="/fsx/leandro/code/entalpic/extras/vtstscripts-1034/chgsum.pl",
-                bader_path="/fsx/leandro/code/entalpic/extras/bader",
-                output_folder="s3://entalpic/bader/"
-            )
-        ],
-        job_name="small_batch_of_10",
-        logging_dir="logdir",
-        partition=partition,
-        qos="high",
-        tasks=10000,
-        max_array_launch_parallel=True,
-        time="03:00:00",
-    ).run()
