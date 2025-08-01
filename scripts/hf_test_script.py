@@ -8,8 +8,6 @@ import os, argparse
 
 def read_options():
 
-def read_options():
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-b", "--bucket_name", dest="bucket_name", type=str, 
