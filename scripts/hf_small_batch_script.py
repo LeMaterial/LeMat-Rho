@@ -6,6 +6,7 @@ from pymatgen.core.structure import Structure
 import os, argparse, json
 
 from datatrove.pipeline.base import PipelineStep
+from datatrove.executor import SlurmPipelineExecutor
 
 from batch_flow_calculations import RunChgcarWF
 
