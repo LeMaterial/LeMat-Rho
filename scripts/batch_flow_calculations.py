@@ -8,6 +8,7 @@ from upload_to_aws import boto_insert
 from jobflow import Flow, SETTINGS, Response, job, run_locally
 
 from datatrove.pipeline.base import PipelineStep
+from datatrove.data import DocumentsPipeline
 
 import os, argparse, json
 
@@ -24,7 +25,7 @@ class RunChgcarWF(PipelineStep):
         self.region_name = region_name
         self.metadata = metadata
 
-    def run(self):
+    def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
 
         s = Structure(
         lattice=[x for y in metadata["lattice_vectors"] for x in y],
