@@ -27,21 +27,18 @@ class RunChgcarWF(PipelineStep):
         self.metadata_batch = get_datafolder(metadata_batch)
         
 
-    def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
+    def run(self, data, rank=0, world_size=1):
 
-        filenames = self.metadata_batch.get_shard(rank, world_size)
-        logger.info(f"Total files: {len(filenames)}")
-
-        for filename in filenames:
+        for metadata in self.metadata_batch[rank]:
 
             s = Structure(
-            lattice=[x for y in filename["lattice_vectors"] for x in y],
-            species=filename["species_at_sites"],
-            coords=filename["cartesian_site_positions"],
+            lattice=[x for y in metadata["lattice_vectors"] for x in y],
+            species=metadata["species_at_sites"],
+            coords=metadata["cartesian_site_positions"],
             coords_are_cartesian=True,
             )
 
-            run_calc = relax_start_pbe(s, filename)
+            run_calc = relax_start_pbe(s, metadata)
             boto_job = boto_insert(run_calc.output, self.bucket_name, 
                                     self.aws_access_key_id, self.aws_secret_access_key, 
                                     self.region_name)
