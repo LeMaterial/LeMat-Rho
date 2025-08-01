@@ -3,7 +3,7 @@ from run_calculation import relax_start_pbe
 from jobflow import run_locally
 from pymatgen.core.structure import Structure
 
-import os, argparse
+import os, argparse, json
 
 
 def read_options():
