@@ -10,13 +10,13 @@ from jobflow import Flow, SETTINGS, Response, job, run_locally
 from datatrove.pipeline.base import PipelineStep
 from datatrove.data import DocumentsPipeline
 
-import os, argparse, json
+import os, argparse, json, sys
 
 
 class RunChgcarWF(PipelineStep):
 
     def __init__(self, bucket_name, aws_access_key_id, aws_secret_access_key,
-    region_name, metadata):
+    region_name, metadata, scripts_directory=None):
         super().__init__()
 
         self.bucket_name = bucket_name
@@ -24,9 +24,13 @@ class RunChgcarWF(PipelineStep):
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
         self.metadata = metadata
+        self.scripts_directory = scripts_directory
+        
 
     def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
 
+        if self.scripts_directory:
+            sys.path.append(self.scripts_directory)
         s = Structure(
         lattice=[x for y in self.metadata["lattice_vectors"] for x in y],
         species=self.metadata["species_at_sites"],

@@ -3,7 +3,7 @@ from run_calculation import relax_start_pbe
 from jobflow import run_locally
 from pymatgen.core.structure import Structure
 
-import os, argparse, json
+import os, argparse, json, sys
 
 from datatrove.pipeline.base import PipelineStep
 from datatrove.executor import SlurmPipelineExecutor
@@ -33,6 +33,10 @@ def read_options():
                         help="cpus_per_task")
     parser.add_argument("-e", "--env_command", dest="env_command", type=str, 
                         help="Location of file to activate environment")
+    parser.add_argument("-e", "--env_command", dest="env_command", type=str, 
+                        help="Location of file to activate environment")
+    parser.add_argument("-d", "--scripts_directory", dest="scripts_directory", type=str, 
+                        help="Directory of where all the scripts are, ie your repo")
     
     args = parser.parse_args()
 
@@ -52,6 +56,7 @@ if __name__=="__main__":
     partition = args.partition
     cpus_per_task = args.cpus_per_task
     env_command = args.env_command
+    scripts_directory = args.scripts_directory
 
     metadata_batch = json.load(open(batch_file, 'r'))
 
@@ -64,7 +69,8 @@ if __name__=="__main__":
                     aws_access_key_id, 
                     aws_secret_access_key,
                     region_name, 
-                    metadata
+                    metadata,
+                    scripts_directory=scripts_directory
                 )
             ],
             job_name="small_batch_RunChgcarWF",
