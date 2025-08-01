@@ -24,7 +24,7 @@ class RunChgcarWF(PipelineStep):
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
-        self.metadata_batch = get_datafolder(metadata_batch)
+        self.metadata_batch = metadata_batch
         
 
     def run(self, data, rank=0, world_size=1):
