@@ -1,17 +1,13 @@
-from upload_to_aws import boto_insert
-from run_calculation import relax_start_pbe
 from batch_flow_calculations import run_multiple_calcs
 
 from jobflow import run_locally
 from pymatgen.core.structure import Structure
 
-from upload_to_aws import boto_insert
-from run_calculation import relax_start_pbe
-from jobflow import run_locally
-from pymatgen.core.structure import Structure
-
 import os, argparse, json, random
 
+from datatrove.data import DocumentsPipeline
+from datatrove.executor import SlurmPipelineExecutor
+from datatrove.pipeline.base import PipelineStep
 
 
 def read_options():
@@ -26,6 +22,10 @@ def read_options():
                         help="aws s3 secret access key")
     parser.add_argument("-r", "--region_name", dest="region_name", type=str, 
                         help="aws s3 region name")
+    parser.add_argument("-l", "--logdir", dest="logdir", type=str, 
+                        help="log directory for DataTrove")
+    parser.add_argument("-l", "--partition", dest="partition", type=str, 
+                        help="partition")
 
     args = parser.parse_args()
 
@@ -40,6 +40,8 @@ if __name__=="__main__":
     aws_access_key_id = args.aws_access_key_id
     aws_secret_access_key = args.aws_secret_access_key
     region_name = args.region_name
+    logdir = args.logdir
+    partition = args.partition
 
     # make a workflow calculating 10 materials
     metadatas = json.load(open('small_batch_800.json', 'r'))
@@ -48,7 +50,25 @@ if __name__=="__main__":
     runmult_job = run_multiple_calcs(metadatas, bucket_name, aws_access_key_id, 
     aws_secret_access_key, region_name)
 
-    # run_calc = relax_start_pbe(s, metadata)
-    # boto_job = boto_insert(run_calc.output, metadata, bucket_name, 
-    #                        aws_access_key_id, aws_secret_access_key, region_name)
     run_locally([runmult_job], create_folders=True)
+
+
+    SlurmPipelineExecutor(
+        pipeline=[
+            BaderData(
+                aeccar0_folder="s3://materialsproject-parsed/aeccar0s",
+                aeccar2_folder="s3://materialsproject-parsed/aeccar2s",
+                chgcar_folder="s3://materialsproject-parsed/chgcars",
+                perl_chgcar_file="/fsx/leandro/code/entalpic/extras/vtstscripts-1034/chgsum.pl",
+                bader_path="/fsx/leandro/code/entalpic/extras/bader",
+                output_folder="s3://entalpic/bader/"
+            )
+        ],
+        job_name="small_batch_of_10",
+        logging_dir="logdir",
+        partition=partition,
+        qos="high",
+        tasks=10000,
+        max_array_launch_parallel=True,
+        time="03:00:00",
+    ).run()

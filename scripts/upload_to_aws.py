@@ -38,7 +38,7 @@ def boto_insert(
         name of region e.g. us-north-1    
     """
 
-    file_path = prev_outputs['prev_dir']
+    file_path = prev_outputs['prev_dir'].dir_name.split(':')[-1]
     metadata = prev_outputs['metadata']
     json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
 
