@@ -18,7 +18,7 @@ def read_options():
                         help="aws s3 secret access key")
     parser.add_argument("-r", "--region_name", dest="region_name", type=str, 
                         help="aws s3 region name")
-    parser.add_argument("-b", "--batch_file", dest="batch_file", type=str, 
+    parser.add_argument("-f", "--batch_file", dest="batch_file", type=str, 
                         help="File containing dicts of metadata")
     parser.add_argument("-i", "--batch_index", dest="batch_index", type=int, 
                         help="Index of item in the json file corresponding what structure to run calculation on")
