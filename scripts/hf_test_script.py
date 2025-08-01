@@ -46,13 +46,12 @@ if __name__=="__main__":
     else:
         batch_metadata = json.load(open(batch_file, 'r'))
         metadata = batch_metadata[batch_index]
-        s = get_structure_from_hf_row(
+        s = Structure(
             lattice=[x for y in metadata["lattice_vectors"] for x in y],
             species=metadata["species_at_sites"],
             coords=metadata["cartesian_site_positions"],
             coords_are_cartesian=True,
         )
-
 
     run_calc = relax_start_pbe(s, metadata)
     boto_job = boto_insert(run_calc.output, bucket_name, 
