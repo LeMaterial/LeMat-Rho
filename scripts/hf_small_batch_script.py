@@ -33,8 +33,6 @@ def read_options():
                         help="cpus_per_task")
     parser.add_argument("-e", "--env_command", dest="env_command", type=str, 
                         help="Location of file to activate environment")
-    parser.add_argument("-e", "--env_command", dest="env_command", type=str, 
-                        help="Location of file to activate environment")
     parser.add_argument("-d", "--scripts_directory", dest="scripts_directory", type=str, 
                         help="Directory of where all the scripts are, ie your repo")
     
