@@ -1,13 +1,13 @@
-from batch_flow_calculations import run_multiple_calcs
-
+from upload_to_aws import boto_insert
+from run_calculation import relax_start_pbe
 from jobflow import run_locally
 from pymatgen.core.structure import Structure
 
-import os, argparse, json, random
+import os, argparse, json
 
-from datatrove.data import DocumentsPipeline
-from datatrove.executor import SlurmPipelineExecutor
 from datatrove.pipeline.base import PipelineStep
+
+from batch_flow_calculations import RunChgcarWF
 
 
 def read_options():
@@ -16,17 +16,21 @@ def read_options():
 
     parser.add_argument("-b", "--bucket_name", dest="bucket_name", type=str, 
                         help="name of aws s3 bucket")
-    parser.add_argument("-i", "--aws_access_key_id", dest="aws_access_key_id", type=str, 
+    parser.add_argument("-a", "--aws_access_key_id", dest="aws_access_key_id", type=str, 
                         help="aws s3 access ID")
     parser.add_argument("-s", "--aws_secret_access_key", dest="aws_secret_access_key", type=str, 
                         help="aws s3 secret access key")
     parser.add_argument("-r", "--region_name", dest="region_name", type=str, 
                         help="aws s3 region name")
+    parser.add_argument("-f", "--batch_file", dest="batch_file", type=str, 
+                        help="File containing dicts of metadata")
     parser.add_argument("-l", "--logdir", dest="logdir", type=str, 
-                        help="log directory for DataTrove")
-    parser.add_argument("-l", "--partition", dest="partition", type=str, 
+                        help="Directory to log outputs")
+    parser.add_argument("-p", "--partition", dest="partition", type=str, 
                         help="partition")
-
+    parser.add_argument("-p", "--cpus_per_task", dest="cpus_per_task", type=str, 
+                        help="cpus_per_task")
+    
     args = parser.parse_args()
 
     return args
@@ -40,15 +44,37 @@ if __name__=="__main__":
     aws_access_key_id = args.aws_access_key_id
     aws_secret_access_key = args.aws_secret_access_key
     region_name = args.region_name
+    batch_file = args.batch_file
     logdir = args.logdir
     partition = args.partition
+    cpus_per_task = args.cpus_per_task
 
-    # make a workflow calculating 10 materials
-    metadatas = json.load(open('small_batch_800.json', 'r'))
-    metadatas = random.sample(metadatas, 10)
+    metadata_batch = json.load(open(batch_file, 'r'))
 
-    runmult_job = run_multiple_calcs(metadatas, bucket_name, aws_access_key_id, 
-    aws_secret_access_key, region_name)
+    for i, metadata in enumerate(metadata_batch):
 
-    run_locally([runmult_job], create_folders=True)
+        SlurmPipelineExecutor(
+            pipeline=[
+                RunChgcarWF(
+                    bucket_name=bucket_name, 
+                    aws_access_key_id=aws_access_key_id, 
+                    aws_secret_access_key=aws_secret_access_key,
+                    region_name=region_name, 
+                    metadata=metadata
+                )
+            ],
+            job_name="small_batch_RunChgcarWF",
+            logging_dir=logdir,
+            partition=partition,
+            # sbatch_args={
+            #     "mem-per-cpu": "1950M"
+            # },
+            cpus_per_task=cpus_per_task,
+            tasks=1,
+            max_array_launch_parallel=True,
+            time="03:00:00",
+        ).run()
+
+        wf = RunChgcarWF()
+        wf.
 
