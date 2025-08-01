@@ -33,8 +33,6 @@ def read_options():
                         help="cpus_per_task")
     parser.add_argument("-e", "--env_command", dest="env_command", type=str, 
                         help="Location of file to activate environment")
-    parser.add_argument("-d", "--scripts_directory", dest="scripts_directory", type=str, 
-                        help="Directory of where all the scripts are, ie your repo")
     
     args = parser.parse_args()
 
@@ -58,28 +56,26 @@ if __name__=="__main__":
 
     metadata_batch = json.load(open(batch_file, 'r'))
 
-    for i, metadata in enumerate(metadata_batch):
-
-        SlurmPipelineExecutor(
-            pipeline=[
-                RunChgcarWF(
-                    bucket_name, 
-                    aws_access_key_id, 
-                    aws_secret_access_key,
-                    region_name, 
-                    metadata,
-                    scripts_directory=scripts_directory
-                )
-            ],
-            job_name="small_batch_RunChgcarWF",
-            logging_dir=logdir,
-            partition=partition,
-            # sbatch_args={
-            #     "mem-per-cpu": "1950M"
-            # },
-            env_command='source %s' %(env_command),
-            cpus_per_task=cpus_per_task,
-            tasks=1,
-            max_array_launch_parallel=True,
-            time="03:00:00",
-        ).run()
+    SlurmPipelineExecutor(
+        pipeline=[
+            RunChgcarWF(
+                bucket_name, 
+                aws_access_key_id, 
+                aws_secret_access_key,
+                region_name, 
+                metadata_batch,
+                scripts_directory=scripts_directory
+            )
+        ],
+        job_name="small_batch_RunChgcarWF",
+        logging_dir=logdir,
+        partition=partition,
+        # sbatch_args={
+        #     "mem-per-cpu": "1950M"
+        # },
+        env_command='source %s' %(env_command),
+        cpus_per_task=cpus_per_task,
+        tasks=len(metadata_batch),
+        max_array_launch_parallel=True,
+        time="03:00:00",
+    ).run()
