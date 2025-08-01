@@ -35,7 +35,7 @@ class RunChgcarWF(PipelineStep):
         )
 
         run_calc = relax_start_pbe(s, self.metadata)
-        boto_job = boto_insert(run_calc.output, self.metadata, self.bucket_name, 
+        boto_job = boto_insert(run_calc.output, self.bucket_name, 
                                 self.aws_access_key_id, self.aws_secret_access_key, 
                                 self.region_name)
 
