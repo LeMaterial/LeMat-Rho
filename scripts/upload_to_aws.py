@@ -12,8 +12,7 @@ from jobflow import job, Job
 
 @job
 def boto_insert(
-                vasp_job: str,
-                metadata: Dict[str, Any],
+                prev_outputs: Dict[str, Any],
                 bucket_name: str,
                 aws_access_key_id: Optional[str] = None, 
                 aws_secret_access_key: Optional[str] = None, 
@@ -39,7 +38,10 @@ def boto_insert(
         name of region e.g. us-north-1    
     """
 
-    file_path = vasp_job.split(':')[-1]
+    file_path = prev_outputs['prev_dir']
+    metadata = prev_outputs['metadata']
+    json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
+
     session = botocore.session.get_session()
     
     # Create S3 client with credentials

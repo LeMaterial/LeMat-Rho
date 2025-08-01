@@ -37,6 +37,6 @@ if __name__=="__main__":
     metadata = {'mat_id': 'Li_test'}
 
     run_calc = relax_start_pbe(s, metadata)
-    boto_job = boto_insert(run_calc.output, metadata, bucket_name, 
+    boto_job = boto_insert(run_calc.output, bucket_name, 
                            aws_access_key_id, aws_secret_access_key, region_name)
     run_locally([run_calc, boto_job], create_folders=True)
