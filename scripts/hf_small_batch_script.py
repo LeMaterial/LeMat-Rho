@@ -52,7 +52,6 @@ if __name__=="__main__":
     partition = args.partition
     cpus_per_task = args.cpus_per_task
     env_command = args.env_command
-    scripts_directory = args.scripts_directory
 
     metadata_batch = json.load(open(batch_file, 'r'))
 
@@ -64,7 +63,6 @@ if __name__=="__main__":
                 aws_secret_access_key,
                 region_name, 
                 metadata_batch,
-                scripts_directory=scripts_directory
             )
         ],
         job_name="small_batch_RunChgcarWF",
