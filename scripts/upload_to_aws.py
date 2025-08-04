@@ -30,10 +30,55 @@ TODO:
 
 
 class RunChgcarWF(PipelineStep):
+    """
+    DataTrove pipeline that manages Slurm submission of multiple JobFlow calculations in parallel. 
+        Each job is associated with a bulk structure which will be relaxed using VASP and then 
+        perform a static calculation to compute the CHGCAR and AECCAR files. The VASP ouput files
+        are then stored in an AWS S3 bucket.
 
-    def __init__(self, bucket_name, aws_access_key_id, aws_secret_access_key,
-    region_name, metadata_batch):
+    Parameters
+    ----------
+    bucket_name : str
+        AWS S3 Bucket name to insert data into
+    aws_access_key_id : str
+        AWS S3 access ID to insert data into
+    aws_secret_access_key : str
+        AWS S3 password to insert data into
+    region_name : str
+        Name of the region associated with your AWS S3 Bucket
+    metadata_batch : list
+        List of metadata with each item in the list being associated with one bulk (one set 
+        of calculations).
+
+    """
+
+
+    def __init__(
+        self, 
+        bucket_name: str,
+        aws_access_key_id: str,
+        aws_secret_access_key: str,
+        region_name: str,
+        metadata_batch: list):
         super().__init__()
+
+        """
+        Attributes
+        ----------
+        bucket_name : str
+            AWS S3 Bucket name to insert data into
+        aws_access_key_id : str
+            AWS S3 access ID to insert data into
+        aws_secret_access_key : str
+            AWS S3 password to insert data into
+        region_name : str
+            Name of the region associated with your AWS S3 Bucket
+        metadata_batch : list
+            List of metadata with each item in the list being associated with one bulk (one set 
+            of calculations). The format of each metadata dictionary is as follows:
+
+
+        """
 
         self.bucket_name = bucket_name
         self.aws_access_key_id = aws_access_key_id
@@ -43,6 +88,13 @@ class RunChgcarWF(PipelineStep):
         
 
     def run(self, data, rank=0, world_size=1):
+        """
+        The run method is a part of the DataTrove syntax. By running this method with the 
+            SlurmPipelineExecutor, it will count the rank starting from 0 to do an operation. 
+            Here rank is utilized as the index of items in the metadata_batch. From the metadata, 
+            we get the structure which is plugged into a Flow that calculates the CHGCAR 
+            (relax_start_pbe) and inserts data into AWS S3 (boto_insert).
+        """
 
         metadata = self.metadata_batch[rank]
         s = Structure(
