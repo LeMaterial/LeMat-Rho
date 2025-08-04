@@ -56,8 +56,6 @@ def relax(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If mat_id is not provided in metadata.
 
@@ -147,8 +145,6 @@ def relax_start_pbe(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If mat_id is not provided in metadata.
 
@@ -255,8 +251,6 @@ def static_calculation(
             Number of cores per band calculation group. Default is 2.
         worker (str, optional):
             Worker identifier for the workflow manager.
-        launchpad_path (str, optional):
-            Path to the LaunchPad database. If not provided, it will use the default settings.
     Raises:
         ValueError: If metadata is not provided.
 

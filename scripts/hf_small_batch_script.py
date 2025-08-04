@@ -1,14 +1,8 @@
-from upload_to_aws import boto_insert
-from run_calculation import relax_start_pbe
-from jobflow import run_locally
-from pymatgen.core.structure import Structure
-
-import os, argparse, json, sys
-
-from datatrove.pipeline.base import PipelineStep
 from datatrove.executor import SlurmPipelineExecutor
 
-from batch_flow_calculations import RunChgcarWF
+from upload_to_aws import RunChgcarWF
+
+import argparse, json
 
 
 def read_options():

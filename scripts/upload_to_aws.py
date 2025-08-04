@@ -3,11 +3,61 @@ from botocore.exceptions import ClientError
 import botocore.session
 from botocore.client import Config
 
-import glob, os, json
-from pathlib import Path
-from typing import Optional, Dict, Any
+from datatrove.pipeline.base import PipelineStep
+from datatrove.data import DocumentsPipeline
+from datatrove.io import get_datafolder
 
-from jobflow import job, Job
+from jobflow import Flow, SETTINGS, Response, job, run_locally, Job
+
+from pymatgen.core import Structure
+
+import os, argparse, json, sys, glob
+from typing import Optional, Dict, Any
+from pathlib import Path
+
+from run_calculation import relax_start_pbe
+
+
+"""
+TODO:
+    - Optimize core usage
+    - Incorporate more output jobs? e.g. DDEC, Lobster? Needs WAVECAR, then deletes WAVECAR
+    - Scrap Boto, use DataTrove for cleaner code
+    - Job as json file, save some kind of record
+    - Add a function (or incorporate a method into RunChgcarWF) to get data from HF dataset. 
+    - Add a method to check S3 if data already exists
+"""
+
+
+class RunChgcarWF(PipelineStep):
+
+    def __init__(self, bucket_name, aws_access_key_id, aws_secret_access_key,
+    region_name, metadata_batch):
+        super().__init__()
+
+        self.bucket_name = bucket_name
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
+        self.region_name = region_name
+        self.metadata_batch = metadata_batch
+        
+
+    def run(self, data, rank=0, world_size=1):
+
+        metadata = self.metadata_batch[rank]
+        s = Structure(
+        lattice=[x for y in metadata["lattice_vectors"] for x in y],
+        species=metadata["species_at_sites"],
+        coords=metadata["cartesian_site_positions"],
+        coords_are_cartesian=True,
+        )
+
+        run_calc = relax_start_pbe(s, metadata)
+        boto_job = boto_insert(run_calc.output, self.bucket_name, 
+                                self.aws_access_key_id, self.aws_secret_access_key, 
+                                self.region_name)
+
+        run_locally([run_calc, boto_job], create_folders=True)
 
 
 @job
