@@ -114,9 +114,11 @@ class RunChgcarWF(PipelineStep):
         # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
         # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
         # everything but the WAVECAR and POTCAR.
-        boto_job = boto_insert(run_calc.output, self.bucket_name, 
-                                self.aws_access_key_id, self.aws_secret_access_key, 
-                                self.region_name, job_json=run_calc.as_dict())
+        boto_job = boto_insert(
+            run_calc.output, self.bucket_name, 
+            self.aws_access_key_id, self.aws_secret_access_key, 
+            self.region_name, job_json=run_calc.as_dict()
+            )
 
         run_locally([run_calc, boto_job], create_folders=True)
 
@@ -128,7 +130,6 @@ def boto_insert(
                 aws_access_key_id: Optional[str] = None, 
                 aws_secret_access_key: Optional[str] = None, 
                 region_name: Optional[str] = None,
-                job_json: Optional[dict] = None,
                 skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
     """
     Inserts Completed VASP calculations into AWS S3 bucket.
@@ -150,10 +151,13 @@ def boto_insert(
         name of region e.g. us-north-1    
     """
 
-    print('################PRINTING job_json################')
-    print(job_json)
+    print('################PRINTING OUTPUT################')
+    print(prev_outputs)
+    print('################PRINTING pre_static_job################')
+    print(prev_outputs['pre_static_job'].as_dict())
+    print('################PRINTING relax_flow################')
+    print(prev_outputs['relax_flow'].as_dict())
 
-    file_path = prev_outputs['prev_dir'].dir_name.split(':')[-1]
     metadata = prev_outputs['metadata']
     json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
 
@@ -170,11 +174,20 @@ def boto_insert(
 
     mat_id = metadata.get("mat_id", None)
 
-    for f in glob.glob(os.path.join(file_path, '*')):
-        fname = f.split('/')[-1].replace('.gz', '')
-        if fname in skip_files:
-            continue
-        fkey = os.path.join(mat_id, 'static_maker', f.split('/')[-2:][1])
-        with open(f, 'rb') as body:
-            s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
-        print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
+    vasp_folders = ['pre_static_job', 'relax_maker_1', 'relax_maker_2', 'static_maker'] 
+
+    for vasp_folder in vasp_folders:
+        file_path = prev_outputs['vasp_folder']
+
+            for f in glob.glob(os.path.join(file_path, '*')):
+                fname = f.split('/')[-1].replace('.gz', '')
+                if fname in skip_files:
+                    continue
+                if vasp_folder in ['pre_static_job', 'relax_maker_1', 'relax_maker_2']:
+                    if "OUTCAR" not in f and "vasprun.xml" not in f:
+                        continue
+
+                fkey = os.path.join(mat_id, vasp_folder, f.split('/')[-2:][1])
+                with open(f, 'rb') as body:
+                    s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
+                print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
