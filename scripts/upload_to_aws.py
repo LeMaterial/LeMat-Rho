@@ -21,7 +21,6 @@ from run_calculation import relax_start_pbe
 """
 TODO:
     - Optimize core usage
-    - Incorporate more output jobs? e.g. DDEC, Lobster? Needs WAVECAR, then deletes WAVECAR
     - Scrap Boto, use DataTrove for cleaner code
     - Job as json file, save some kind of record
     - Add a function (or incorporate a method into RunChgcarWF) to get data from HF dataset. 
@@ -97,6 +96,8 @@ class RunChgcarWF(PipelineStep):
         """
 
         metadata = self.metadata_batch[rank]
+
+        # make a PMG Structure object from metadata
         s = Structure(
         lattice=[x for y in metadata["lattice_vectors"] for x in y],
         species=metadata["species_at_sites"],
@@ -104,10 +105,18 @@ class RunChgcarWF(PipelineStep):
         coords_are_cartesian=True,
         )
 
+        # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
+        # The relax_start_pbe performs 4 DFT simulations: 
+        # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
         run_calc = relax_start_pbe(s, metadata)
+
+        # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
+        # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
+        # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
+        # everything but the WAVECAR and POTCAR.
         boto_job = boto_insert(run_calc.output, self.bucket_name, 
                                 self.aws_access_key_id, self.aws_secret_access_key, 
-                                self.region_name)
+                                self.region_name, job_json=run_calc.as_dict())
 
         run_locally([run_calc, boto_job], create_folders=True)
 
@@ -119,6 +128,7 @@ def boto_insert(
                 aws_access_key_id: Optional[str] = None, 
                 aws_secret_access_key: Optional[str] = None, 
                 region_name: Optional[str] = None,
+                job_json: Optional[dict] = None,
                 skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
     """
     Inserts Completed VASP calculations into AWS S3 bucket.
@@ -139,6 +149,9 @@ def boto_insert(
     region_name::
         name of region e.g. us-north-1    
     """
+
+    print('################PRINTING job_json################')
+    print(job_json)
 
     file_path = prev_outputs['prev_dir'].dir_name.split(':')[-1]
     metadata = prev_outputs['metadata']
@@ -161,7 +174,7 @@ def boto_insert(
         fname = f.split('/')[-1].replace('.gz', '')
         if fname in skip_files:
             continue
-        fkey = os.path.join(mat_id, f.split('/')[-2:][0], f.split('/')[-2:][1])
+        fkey = os.path.join(mat_id, 'static_maker', f.split('/')[-2:][1])
         with open(f, 'rb') as body:
             s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
         print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
