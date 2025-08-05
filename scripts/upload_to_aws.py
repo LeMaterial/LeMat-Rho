@@ -153,6 +153,8 @@ def boto_insert(
 
     print('################PRINTING OUTPUT################')
     print(prev_outputs)
+    print('################PRINTING relax_flow################')
+    print(prev_outputs['relax_flow_obj'])
     print('################PRINTING pre_static_job################')
     print(prev_outputs['pre_static_job'].as_dict())
     print('################PRINTING relax_flow################')
