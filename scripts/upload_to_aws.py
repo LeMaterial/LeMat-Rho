@@ -119,10 +119,13 @@ class RunChgcarWF(PipelineStep):
 
         try:
             self.boto_check(metadata['mat_id'])
+            print('%s already exists in S3, skipping Flow')
+            return None
         except botocore.exceptions.ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == '404' or error_code == 'NoSuchKey':
-                return None  # File does not exist
+                print('%s does not exists in S3, proceeding with Flow')
+                pass
             else:
                 # For other errors, re-raise or handle as needed
                 raise
