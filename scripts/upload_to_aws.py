@@ -117,7 +117,7 @@ class RunChgcarWF(PipelineStep):
         boto_job = boto_insert(
             run_calc.output, self.bucket_name, 
             self.aws_access_key_id, self.aws_secret_access_key, 
-            self.region_name, job_json=run_calc.as_dict()
+            self.region_name
             )
 
         run_locally([run_calc, boto_job], create_folders=True)
