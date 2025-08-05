@@ -1,6 +1,7 @@
 import boto3
 from botocore.exceptions import ClientError
 import botocore.session
+import botocore
 from botocore.client import Config
 
 from datatrove.pipeline.base import PipelineStep
@@ -84,6 +85,17 @@ class RunChgcarWF(PipelineStep):
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
         self.metadata_batch = metadata_batch
+
+        session = botocore.session.get_session()
+        
+        # Create S3 client with credentials
+        self.s3_client = session.create_client(
+            's3',
+            region_name=self.region_name,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            config=Config(signature_version='s3v4')
+        )
         
 
     def run(self, data, rank=0, world_size=1):
@@ -105,6 +117,17 @@ class RunChgcarWF(PipelineStep):
         coords_are_cartesian=True,
         )
 
+        try:
+            self.boto_check(metadata['mat_id'])
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == '404' or error_code == 'NoSuchKey':
+                return None  # File does not exist
+            else:
+                # For other errors, re-raise or handle as needed
+                raise
+
+
         # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
         # The relax_start_pbe performs 4 DFT simulations: 
         # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
@@ -115,21 +138,27 @@ class RunChgcarWF(PipelineStep):
         # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
         # everything but the WAVECAR and POTCAR.
         boto_job = boto_insert(
+            self.s3_client
             run_calc.output, self.bucket_name, 
-            self.aws_access_key_id, self.aws_secret_access_key, 
-            self.region_name
             )
 
         run_locally([run_calc, boto_job], create_folders=True)
 
+    def boto_check(self, mat_id):
+        """
+        Method to check if a mat_id already exists in the S3 bucket
+        """
+
+        fkey = '%s/static2/CHGCAR.gz' %(mat_id)
+        self.s3_client.head_object(Bucket=self.bucket_name, 
+        Key=fkey)
+
 
 @job
 def boto_insert(
+                s3_session
                 prev_outputs: Dict[str, Any],
                 bucket_name: str,
-                aws_access_key_id: Optional[str] = None, 
-                aws_secret_access_key: Optional[str] = None, 
-                region_name: Optional[str] = None,
                 skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
     """
     Inserts Completed VASP calculations into AWS S3 bucket.
@@ -143,36 +172,13 @@ def boto_insert(
             the key will just be the full directory. e.g. 
             /path/to/VASP/calculation/CHGCAR is the Key if no object_key
             is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
-    aws_access_key_id::
-        aws access key
-    aws_secret_access_key::
-        aws secret access key
-    region_name::
-        name of region e.g. us-north-1    
     """
 
-    # print('################PRINTING OUTPUT################')
-    # print(prev_outputs)
-    # print('################PRINTING relax_flow################')
-    # print(prev_outputs['relax_flow_obj'])
-    # print('################PRINTING pre_static_job################')
-    # print(prev_outputs['pre_static_job'].as_dict())
-    # print('################PRINTING relax_flow################')
-    # print(prev_outputs['relax_flow'].as_dict())
 
     metadata = prev_outputs['metadata']
+    file_path = prev_outputs['relax_flow'].dir_name
+    print('file_path: ', file_path)
     json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
-
-    session = botocore.session.get_session()
-    
-    # Create S3 client with credentials
-    s3 = session.create_client(
-        's3',
-        region_name=region_name,
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key,
-        config=Config(signature_version='s3v4')
-    )
 
     mat_id = metadata.get("mat_id", None)
 
@@ -195,5 +201,5 @@ def boto_insert(
 
             fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
             with open(f, 'rb') as body:
-                s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
+                s3_session.put_object(Bucket=bucket_name, Body=body, Key=fkey)
             print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
