@@ -141,7 +141,7 @@ class RunChgcarWF(PipelineStep):
         # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
         # everything but the WAVECAR and POTCAR.
         boto_job = boto_insert(
-            self.s3_client
+            self.s3_client,
             run_calc.output, self.bucket_name, 
             )
 
