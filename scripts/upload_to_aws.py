@@ -179,15 +179,15 @@ def boto_insert(
     for vasp_folder in vasp_folders:
         file_path = prev_outputs['vasp_folder']
 
-            for f in glob.glob(os.path.join(file_path, '*')):
-                fname = f.split('/')[-1].replace('.gz', '')
-                if fname in skip_files:
+        for f in glob.glob(os.path.join(file_path, '*')):
+            fname = f.split('/')[-1].replace('.gz', '')
+            if fname in skip_files:
+                continue
+            if vasp_folder in ['pre_static_job', 'relax_maker_1', 'relax_maker_2']:
+                if "OUTCAR" not in f and "vasprun.xml" not in f:
                     continue
-                if vasp_folder in ['pre_static_job', 'relax_maker_1', 'relax_maker_2']:
-                    if "OUTCAR" not in f and "vasprun.xml" not in f:
-                        continue
 
-                fkey = os.path.join(mat_id, vasp_folder, f.split('/')[-2:][1])
-                with open(f, 'rb') as body:
-                    s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
-                print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
+            fkey = os.path.join(mat_id, vasp_folder, f.split('/')[-2:][1])
+            with open(f, 'rb') as body:
+                s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
+            print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
