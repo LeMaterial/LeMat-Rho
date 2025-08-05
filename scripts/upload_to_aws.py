@@ -159,7 +159,7 @@ class RunChgcarWF(PipelineStep):
 
 @job
 def boto_insert(
-                s3_session
+                s3_session,
                 prev_outputs: Dict[str, Any],
                 bucket_name: str,
                 skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
