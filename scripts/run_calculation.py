@@ -227,7 +227,6 @@ def relax_start_pbe(
     outputs = {
         'pre_static_job': pre_static_job.output, 
         'relax_flow': relax_flow.output,
-        'relax_flow_obj': relax_flow.__dict__, 
         'metadata': metadata
         }
 

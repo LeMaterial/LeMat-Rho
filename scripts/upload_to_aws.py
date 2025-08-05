@@ -151,14 +151,14 @@ def boto_insert(
         name of region e.g. us-north-1    
     """
 
-    print('################PRINTING OUTPUT################')
-    print(prev_outputs)
-    print('################PRINTING relax_flow################')
-    print(prev_outputs['relax_flow_obj'])
-    print('################PRINTING pre_static_job################')
-    print(prev_outputs['pre_static_job'].as_dict())
-    print('################PRINTING relax_flow################')
-    print(prev_outputs['relax_flow'].as_dict())
+    # print('################PRINTING OUTPUT################')
+    # print(prev_outputs)
+    # print('################PRINTING relax_flow################')
+    # print(prev_outputs['relax_flow_obj'])
+    # print('################PRINTING pre_static_job################')
+    # print(prev_outputs['pre_static_job'].as_dict())
+    # print('################PRINTING relax_flow################')
+    # print(prev_outputs['relax_flow'].as_dict())
 
     metadata = prev_outputs['metadata']
     json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
@@ -176,20 +176,24 @@ def boto_insert(
 
     mat_id = metadata.get("mat_id", None)
 
-    vasp_folders = ['pre_static_job', 'relax_maker_1', 'relax_maker_2', 'static_maker'] 
+    vaspjobs = ['pre_static_job', 'relax_flow'] 
 
-    for vasp_folder in vasp_folders:
-        file_path = prev_outputs['vasp_folder']
+    for vaspjob in vaspjobs:
+        file_path = prev_outputs[vaspjob].dir_name
+
 
         for f in glob.glob(os.path.join(file_path, '*')):
             fname = f.split('/')[-1].replace('.gz', '')
             if fname in skip_files:
                 continue
-            if vasp_folder in ['pre_static_job', 'relax_maker_1', 'relax_maker_2']:
+            if vaspjob == 'pre_static_job':
                 if "OUTCAR" not in f and "vasprun.xml" not in f:
                     continue
+                vjob_key = 'static1'
+            elif vaspjob == 'relax_flow':
+                vjob_key = 'static2'
 
-            fkey = os.path.join(mat_id, vasp_folder, f.split('/')[-2:][1])
+            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
             with open(f, 'rb') as body:
                 s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
             print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
