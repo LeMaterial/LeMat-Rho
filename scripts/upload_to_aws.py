@@ -143,7 +143,7 @@ class RunChgcarWF(PipelineStep):
         # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
         # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
         # everything but the WAVECAR and POTCAR.
-        self.boto_insert(response)
+        self.boto_insert(response, metadata)
 
     def boto_insert(
         self,
