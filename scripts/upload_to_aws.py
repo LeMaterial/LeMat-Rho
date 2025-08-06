@@ -137,88 +137,80 @@ class RunChgcarWF(PipelineStep):
         # The relax_start_pbe performs 4 DFT simulations: 
         # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
         run_calc = relax_start_pbe(s, metadata)
+        response = run_locally([run_calc], create_folders=True)
 
         # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
         # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
         # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
         # everything but the WAVECAR and POTCAR.
-        boto_job = boto_insert(
-            self.region_name, self.aws_access_key_id, 
-            self.aws_secret_access_key, 
-            run_calc.output, self.bucket_name, 
-            )
+        self.boto_insert(response)
 
-        run_locally([run_calc, boto_job], create_folders=True)
+    def boto_insert(
+        self,
+        prev_outputs: Dict[str, Any],
+        skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
+        """
+        Inserts Completed VASP calculations into AWS S3 bucket.
 
+        file_path:: 
+            directory of the VASP outputs
+        bucket_name:: 
+            name of the bucket
+        object_key:: 
+            string of text to be append to the front of the file, otherwise 
+                the key will just be the full directory. e.g. 
+                /path/to/VASP/calculation/CHGCAR is the Key if no object_key
+                is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
+        """
 
+        print(response)
+        print(type(response))
+        import pickle 
+        pickle.dump(response, open('response.pkl', 'wb'))
+        json.dump(response.as_dict(), open('response.json', 'wb'))
 
-@job
-def boto_insert(
-                region_name: str,
-                aws_access_key_id: str,
-                aws_secret_access_key: str,
-                prev_outputs: Dict[str, Any],
-                bucket_name: str,
-                skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
-    """
-    Inserts Completed VASP calculations into AWS S3 bucket.
-
-    file_path:: 
-        directory of the VASP outputs
-    bucket_name:: 
-        name of the bucket
-    object_key:: 
-        string of text to be append to the front of the file, otherwise 
-            the key will just be the full directory. e.g. 
-            /path/to/VASP/calculation/CHGCAR is the Key if no object_key
-            is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
-    """
-
-    import pickle 
-    pickle.dump(prev_outputs, open('prev_outputs.pkl', 'wb'))
-
-    # Create S3 client with credentials
-    session = botocore.session.get_session()
-    s3_client = session.create_client(
-        's3',
-        region_name=region_name,
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key,
-        config=Config(signature_version='s3v4')
-    )
+        # Create S3 client with credentials
+        session = botocore.session.get_session()
+        s3_client = session.create_client(
+            's3',
+            region_name=region_name,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            config=Config(signature_version='s3v4')
+        )
 
 
-    metadata = prev_outputs['metadata']
-    file_path = prev_outputs['relax_flow'].dir_name.split(':')[-1]
-    print('file_path: ', file_path)
+        metadata = prev_outputs['metadata']
+        file_path = prev_outputs['relax_flow'].dir_name.split(':')[-1]
+        print('file_path: ', file_path)
 
-    json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
-    print(prev_outputs['relax_flow'].as_dict())
-    json.dump(prev_outputs['relax_flow'].as_dict(), open(os.path.join(file_path, 'relax_flow_output.json'), 'w'))
-    json.dump(prev_outputs['pre_static_job'].as_dict(), open(os.path.join(file_path, 'pre_static_job_output.json'), 'w'))
-    
-    mat_id = metadata.get("mat_id", None)
+        json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
+        print(prev_outputs['relax_flow'].as_dict())
+        json.dump(prev_outputs['relax_flow'].as_dict(), open(os.path.join(file_path, 'relax_flow_output.json'), 'w'))
+        json.dump(prev_outputs['pre_static_job'].as_dict(), open(os.path.join(file_path, 'pre_static_job_output.json'), 'w'))
+        
+        mat_id = metadata.get("mat_id", None)
 
-    vaspjobs = ['pre_static_job', 'relax_flow'] 
+        vaspjobs = ['pre_static_job', 'relax_flow'] 
 
-    for vaspjob in vaspjobs:
-        file_path = prev_outputs[vaspjob].dir_name.split(':')[-1]
+        for vaspjob in vaspjobs:
+            file_path = prev_outputs[vaspjob].dir_name.split(':')[-1]
 
 
-        for f in glob.glob(os.path.join(file_path, '*')):
-            fname = f.split('/')[-1].replace('.gz', '')
-            print('current file: ', fname)
-            print('files to skip: ', skip_files)
-            if fname in skip_files:
-                continue
-            if vaspjob == 'pre_static_job':
-                if "OUTCAR" not in f and "vasprun.xml" not in f:
+            for f in glob.glob(os.path.join(file_path, '*')):
+                fname = f.split('/')[-1].replace('.gz', '')
+                print('current file: ', fname)
+                print('files to skip: ', skip_files)
+                if fname in skip_files:
                     continue
-                vjob_key = 'static1'
-            elif vaspjob == 'relax_flow':
-                vjob_key = 'static2'
+                if vaspjob == 'pre_static_job':
+                    if "OUTCAR" not in f and "vasprun.xml" not in f:
+                        continue
+                    vjob_key = 'static1'
+                elif vaspjob == 'relax_flow':
+                    vjob_key = 'static2'
 
-            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
-            with open(f, 'rb') as body:
-                s3_session.put_object(Bucket=bucket_name, Body=body, Key=fkey)
-            print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
+                fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
+                with open(f, 'rb') as body:
+                    s3_session.put_object(Bucket=bucket_name, Body=body, Key=fkey)
+                print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
