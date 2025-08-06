@@ -230,7 +230,7 @@ def relax_start_pbe(
     #     'metadata': metadata
         # }
 
-    return complete_flow
+    return Response(addition=complete_flow)
 
 
 def static_calculation(
