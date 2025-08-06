@@ -203,6 +203,8 @@ def boto_insert(
 
         for f in glob.glob(os.path.join(file_path, '*')):
             fname = f.split('/')[-1].replace('.gz', '')
+            print('current file: ', fname)
+            print('files to skip: ', skip_files)
             if fname in skip_files:
                 continue
             if vaspjob == 'pre_static_job':
