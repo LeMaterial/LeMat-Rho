@@ -104,10 +104,9 @@ class RunChgcarWF(PipelineStep):
         coords=metadata["cartesian_site_positions"],
         coords_are_cartesian=True,
         )
-
-        session = botocore.session.get_session()
         
         # Create S3 client with credentials
+        session = botocore.session.get_session()
         s3_client = session.create_client(
             's3',
             region_name=self.region_name,
@@ -116,9 +115,12 @@ class RunChgcarWF(PipelineStep):
             config=Config(signature_version='s3v4')
         )
 
-
+        # check if a mat_id already exists in the S3 bucket
         try:
-            self.boto_check(metadata['mat_id'], s3_client)
+            mat_id = metadata['mat_id']
+            fkey = '%s/static2/CHGCAR.gz' %(mat_id)
+            s3_client.head_object(Bucket=self.bucket_name, 
+            Key=fkey)
             print('%s already exists in S3, skipping Flow')
             return None
         except botocore.exceptions.ClientError as e:
@@ -141,25 +143,20 @@ class RunChgcarWF(PipelineStep):
         # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
         # everything but the WAVECAR and POTCAR.
         boto_job = boto_insert(
-            s3_client,
+            self.region_name, self.aws_access_key_id, 
+            self.aws_secret_access_key, 
             run_calc.output, self.bucket_name, 
             )
 
         run_locally([run_calc, boto_job], create_folders=True)
 
-    def boto_check(self, mat_id, s3_client):
-        """
-        Method to check if a mat_id already exists in the S3 bucket
-        """
-
-        fkey = '%s/static2/CHGCAR.gz' %(mat_id)
-        s3_client.head_object(Bucket=self.bucket_name, 
-        Key=fkey)
 
 
 @job
 def boto_insert(
-                s3_session,
+                region_name: str,
+                aws_access_key_id: str,
+                aws_secret_access_key: str,
                 prev_outputs: Dict[str, Any],
                 bucket_name: str,
                 skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
@@ -177,12 +174,25 @@ def boto_insert(
             is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
     """
 
+    # Create S3 client with credentials
+    session = botocore.session.get_session()
+    s3_client = session.create_client(
+        's3',
+        region_name=region_name,
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        config=Config(signature_version='s3v4')
+    )
 
     metadata = prev_outputs['metadata']
     file_path = prev_outputs['relax_flow'].dir_name
     print('file_path: ', file_path)
-    json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
 
+    json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
+    print(prev_outputs['relax_flow'].as_dict())
+    json.dump(prev_outputs['relax_flow'].as_dict(), open(os.path.join(file_path, 'relax_flow_output.json'), 'w'))
+    json.dump(prev_outputs['pre_static_job'].as_dict(), open(os.path.join(file_path, 'pre_static_job_output.json'), 'w'))
+    
     mat_id = metadata.get("mat_id", None)
 
     vaspjobs = ['pre_static_job', 'relax_flow'] 
