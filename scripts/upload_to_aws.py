@@ -172,9 +172,9 @@ class RunChgcarWF(PipelineStep):
         session = botocore.session.get_session()
         s3_client = session.create_client(
             's3',
-            region_name=region_name,
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
+            region_name=self.region_name,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
             config=Config(signature_version='s3v4')
         )
 
@@ -210,5 +210,5 @@ class RunChgcarWF(PipelineStep):
 
                 fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
                 with open(f, 'rb') as body:
-                    s3_session.put_object(Bucket=bucket_name, Body=body, Key=fkey)
-                print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
+                    s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+                print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
