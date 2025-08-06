@@ -84,19 +84,7 @@ class RunChgcarWF(PipelineStep):
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
-        self.metadata_batch = metadata_batch
-
-        session = botocore.session.get_session()
-        
-        # Create S3 client with credentials
-        self.s3_client = session.create_client(
-            's3',
-            region_name=self.region_name,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-            config=Config(signature_version='s3v4')
-        )
-        
+        self.metadata_batch = metadata_batch        
 
     def run(self, data, rank=0, world_size=1):
         """
@@ -117,6 +105,18 @@ class RunChgcarWF(PipelineStep):
         coords_are_cartesian=True,
         )
 
+        session = botocore.session.get_session()
+        
+        # Create S3 client with credentials
+        s3_client = session.create_client(
+            's3',
+            region_name=self.region_name,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            config=Config(signature_version='s3v4')
+        )
+
+
         try:
             self.boto_check(metadata['mat_id'])
             print('%s already exists in S3, skipping Flow')
@@ -131,30 +131,30 @@ class RunChgcarWF(PipelineStep):
                 raise
 
 
-        # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
-        # The relax_start_pbe performs 4 DFT simulations: 
-        # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
-        run_calc = relax_start_pbe(s, metadata)
+    #     # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
+    #     # The relax_start_pbe performs 4 DFT simulations: 
+    #     # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
+    #     run_calc = relax_start_pbe(s, metadata)
 
-        # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
-        # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
-        # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
-        # everything but the WAVECAR and POTCAR.
-        boto_job = boto_insert(
-            self.s3_client,
-            run_calc.output, self.bucket_name, 
-            )
+    #     # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
+    #     # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
+    #     # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
+    #     # everything but the WAVECAR and POTCAR.
+    #     boto_job = boto_insert(
+    #         self.s3_client,
+    #         run_calc.output, self.bucket_name, 
+    #         )
 
-        run_locally([run_calc, boto_job], create_folders=True)
+    #     run_locally([run_calc, boto_job], create_folders=True)
 
-    def boto_check(self, mat_id):
-        """
-        Method to check if a mat_id already exists in the S3 bucket
-        """
+    # def boto_check(self, mat_id):
+    #     """
+    #     Method to check if a mat_id already exists in the S3 bucket
+    #     """
 
-        fkey = '%s/static2/CHGCAR.gz' %(mat_id)
-        self.s3_client.head_object(Bucket=self.bucket_name, 
-        Key=fkey)
+    #     fkey = '%s/static2/CHGCAR.gz' %(mat_id)
+    #     self.s3_client.head_object(Bucket=self.bucket_name, 
+    #     Key=fkey)
 
 
 @job
