@@ -146,7 +146,7 @@ class RunChgcarWF(PipelineStep):
 
     def boto_insert(
         self,
-        prev_outputs: Dict[str, Any], 
+        response: Dict[str, Any], 
         metadata: Dict[str, Any],
         skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
         """
@@ -162,11 +162,7 @@ class RunChgcarWF(PipelineStep):
                 /path/to/VASP/calculation/CHGCAR is the Key if no object_key
                 is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
         """
-
-        print(prev_outputs)
-        import pickle 
-        pickle.dump(prev_outputs, open('response.pkl', 'wb'))
-
+        
         # Create S3 client with credentials
         session = botocore.session.get_session()
         s3_client = session.create_client(
@@ -177,38 +173,109 @@ class RunChgcarWF(PipelineStep):
             config=Config(signature_version='s3v4')
         )
 
-        """
-        file_path = prev_outputs['relax_flow'].dir_name.split(':')[-1]
-        print('file_path: ', file_path)
-
-        json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
-        print(prev_outputs['relax_flow'].as_dict())
-        json.dump(prev_outputs['relax_flow'].as_dict(), open(os.path.join(file_path, 'relax_flow_output.json'), 'w'))
-        json.dump(prev_outputs['pre_static_job'].as_dict(), open(os.path.join(file_path, 'pre_static_job_output.json'), 'w'))
-        
         mat_id = metadata.get("mat_id", None)
 
-        vaspjobs = ['pre_static_job', 'relax_flow'] 
+        # sort the job responses by label_task 
+        response_by_task_label = {}
+        for uuid in response.keys():
+            r = response[uuid][1]
+            if r.output == None:
+                continue
+            response_by_task_label[r.output.task_label] = r
+        
+        # insert the first static calc
+        file_path = response_by_task_label['LeMatRhoPreStaticMaker'].output.dir_name.split(':')[-1]
+        for f in glob.glob(os.path.join(file_path, '*')):
+            fname = f.split('/')[-1].replace('.gz', '')
+            if "OUTCAR" not in f and "vasprun.xml" not in f:
+                continue
+            vjob_key = 'LeMatRhoPreStaticMaker'
+            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
+            with open(f, 'rb') as body:
+                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
-        for vaspjob in vaspjobs:
-            file_path = prev_outputs[vaspjob].dir_name.split(':')[-1]
+        # insert the first relax calc
+        file_path = response_by_task_label['LeMatRhoRelaxMaker 1'].output.dir_name.split(':')[-1]
+        for f in glob.glob(os.path.join(file_path, '*')):
+            fname = f.split('/')[-1].replace('.gz', '')
+            if "OUTCAR" not in f and "vasprun.xml" not in f:
+                continue
+            vjob_key = 'LeMatRhoRelaxMaker_1'
+            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
+            with open(f, 'rb') as body:
+                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+
+        # insert the second relax calc
+        file_path = response_by_task_label['LeMatRhoRelaxMaker 2'].output.dir_name.split(':')[-1]
+        for f in glob.glob(os.path.join(file_path, '*')):
+            fname = f.split('/')[-1].replace('.gz', '')
+            if "OUTCAR" not in f and "vasprun.xml" not in f:
+                continue
+            vjob_key = 'LeMatRhoRelaxMaker_2'
+            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
+            with open(f, 'rb') as body:
+                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+
+        # insert the second static calc
+        file_path = response_by_task_label['LeMatRhoStaticMaker'].output.dir_name.split(':')[-1]
+        for f in glob.glob(os.path.join(file_path, '*')):
+            fname = f.split('/')[-1].replace('.gz', '')
+            if fname in skip_files:
+                continue
+            vjob_key = 'LeMatRhoStaticMaker'
+            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
+            with open(f, 'rb') as body:
+                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+
+        # insert metadata
+        json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
+        with open(os.path.join(file_path, 'metadata.json'), 'rb') as body:
+            s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+        fkey = os.path.join(mat_id, 'metadata.json')
+        print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+
+        # insert jobflow outputs 
+        output_dict = {}
+        for uuid in response.keys():
+            r = response[uuid][1]
+            if r.output == None:
+                continue
+            doc = r.output.model_dump()
+            doc = make_json_serializable(doc)
+            output_dict[uuid] = doc
+        json.dump(output_dict, open(os.path.join(file_path, 'response_outputs.json'), 'w'))        
+        with open(os.path.join(file_path, 'response_outputs.json'), 'rb') as body:
+            s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+        fkey = os.path.join(mat_id, 'response_outputs.json')
+        print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
 
-            for f in glob.glob(os.path.join(file_path, '*')):
-                fname = f.split('/')[-1].replace('.gz', '')
-                print('current file: ', fname)
-                print('files to skip: ', skip_files)
-                if fname in skip_files:
-                    continue
-                if vaspjob == 'pre_static_job':
-                    if "OUTCAR" not in f and "vasprun.xml" not in f:
-                        continue
-                    vjob_key = 'static1'
-                elif vaspjob == 'relax_flow':
-                    vjob_key = 'static2'
+import datetime
+from pymatgen.core.periodic_table import Element
+from pymatgen.core.structure import Composition
+from emmet.core.symmetry import CrystalSystem
 
-                fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
-                with open(f, 'rb') as body:
-                    s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-                print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
-        """
+def make_json_serializable(obj):
+    if isinstance(obj, dict):
+        # Convert keys to str (or another string representation) and recursively convert values
+        return {str(k): make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(i) for i in obj]
+    elif isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.date):
+        return obj.isoformat()
+    elif isinstance(obj, Element):
+        return str(obj)
+    elif isinstance(obj, Composition):
+        return obj.as_dict()
+    elif isinstance(obj, CrystalSystem):
+        return str(obj)
+    
+    # Add additional custom conversions here, e.g., for sets, bytes, custom objects, etc.
+    else:
+        return str(obj)
