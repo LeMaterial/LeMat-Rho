@@ -163,11 +163,11 @@ class RunChgcarWF(PipelineStep):
                 is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
         """
 
-        print(response)
-        print(type(response))
+        print(prev_outputs)
+        print(type(prev_outputs))
         import pickle 
-        pickle.dump(response, open('response.pkl', 'wb'))
-        json.dump(response.as_dict(), open('response.json', 'wb'))
+        pickle.dump(prev_outputs, open('response.pkl', 'wb'))
+        json.dump(prev_outputs.as_dict(), open('response.json', 'wb'))
 
         # Create S3 client with credentials
         session = botocore.session.get_session()
