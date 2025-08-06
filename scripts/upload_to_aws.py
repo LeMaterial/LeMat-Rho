@@ -132,12 +132,11 @@ class RunChgcarWF(PipelineStep):
                 # For other errors, re-raise or handle as needed
                 raise
 
-
         # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
         # The relax_start_pbe performs 4 DFT simulations: 
         # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
         run_calc = relax_start_pbe(s, metadata)
-        response = run_locally(run_calc, create_folders=True)
+        run_locally(run_calc, create_folders=True)
 
         # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
         # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
