@@ -174,6 +174,9 @@ def boto_insert(
             is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
     """
 
+    import pickle 
+    pickle.dump(prev_outputs, open('prev_outputs.pkl', 'wb'))
+
     # Create S3 client with credentials
     session = botocore.session.get_session()
     s3_client = session.create_client(
@@ -184,8 +187,9 @@ def boto_insert(
         config=Config(signature_version='s3v4')
     )
 
+
     metadata = prev_outputs['metadata']
-    file_path = prev_outputs['relax_flow'].dir_name
+    file_path = prev_outputs['relax_flow'].dir_name.split(':')[-1]
     print('file_path: ', file_path)
 
     json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
@@ -198,7 +202,7 @@ def boto_insert(
     vaspjobs = ['pre_static_job', 'relax_flow'] 
 
     for vaspjob in vaspjobs:
-        file_path = prev_outputs[vaspjob].dir_name
+        file_path = prev_outputs[vaspjob].dir_name.split(':')[-1]
 
 
         for f in glob.glob(os.path.join(file_path, '*')):
