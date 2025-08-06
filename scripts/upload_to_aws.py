@@ -147,7 +147,8 @@ class RunChgcarWF(PipelineStep):
 
     def boto_insert(
         self,
-        prev_outputs: Dict[str, Any],
+        prev_outputs: Dict[str, Any], 
+        metadata: Dict[str, Any],
         skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
         """
         Inserts Completed VASP calculations into AWS S3 bucket.
@@ -164,7 +165,6 @@ class RunChgcarWF(PipelineStep):
         """
 
         print(prev_outputs)
-        print(type(prev_outputs))
         import pickle 
         pickle.dump(prev_outputs, open('response.pkl', 'wb'))
 
@@ -178,7 +178,7 @@ class RunChgcarWF(PipelineStep):
             config=Config(signature_version='s3v4')
         )
 
-        metadata = prev_outputs['metadata']
+        """
         file_path = prev_outputs['relax_flow'].dir_name.split(':')[-1]
         print('file_path: ', file_path)
 
@@ -212,3 +212,4 @@ class RunChgcarWF(PipelineStep):
                 with open(f, 'rb') as body:
                     s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
                 print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+        """
