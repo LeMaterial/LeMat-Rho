@@ -167,7 +167,6 @@ class RunChgcarWF(PipelineStep):
         print(type(prev_outputs))
         import pickle 
         pickle.dump(prev_outputs, open('response.pkl', 'wb'))
-        json.dump(prev_outputs.as_dict(), open('response.json', 'wb'))
 
         # Create S3 client with credentials
         session = botocore.session.get_session()
@@ -178,7 +177,6 @@ class RunChgcarWF(PipelineStep):
             aws_secret_access_key=aws_secret_access_key,
             config=Config(signature_version='s3v4')
         )
-
 
         metadata = prev_outputs['metadata']
         file_path = prev_outputs['relax_flow'].dir_name.split(':')[-1]
