@@ -192,7 +192,7 @@ class RunChgcarWF(PipelineStep):
             vjob_key = 'LeMatRhoPreStaticMaker'
             fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
             with open(f, 'rb') as body:
-                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
             print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
         # insert the first relax calc
@@ -204,7 +204,7 @@ class RunChgcarWF(PipelineStep):
             vjob_key = 'LeMatRhoRelaxMaker_1'
             fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
             with open(f, 'rb') as body:
-                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
             print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
         # insert the second relax calc
@@ -216,7 +216,7 @@ class RunChgcarWF(PipelineStep):
             vjob_key = 'LeMatRhoRelaxMaker_2'
             fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
             with open(f, 'rb') as body:
-                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
             print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
         # insert the second static calc
@@ -228,13 +228,13 @@ class RunChgcarWF(PipelineStep):
             vjob_key = 'LeMatRhoStaticMaker'
             fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
             with open(f, 'rb') as body:
-                s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
             print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
         # insert metadata
         json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
         with open(os.path.join(file_path, 'metadata.json'), 'rb') as body:
-            s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+            s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
         fkey = os.path.join(mat_id, 'metadata.json')
         print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
@@ -249,7 +249,7 @@ class RunChgcarWF(PipelineStep):
             output_dict[uuid] = doc
         json.dump(output_dict, open(os.path.join(file_path, 'response_outputs.json'), 'w'))        
         with open(os.path.join(file_path, 'response_outputs.json'), 'rb') as body:
-            s3_session.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
+            s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
         fkey = os.path.join(mat_id, 'response_outputs.json')
         print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
 
