@@ -131,30 +131,30 @@ class RunChgcarWF(PipelineStep):
                 raise
 
 
-    #     # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
-    #     # The relax_start_pbe performs 4 DFT simulations: 
-    #     # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
-    #     run_calc = relax_start_pbe(s, metadata)
+        # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
+        # The relax_start_pbe performs 4 DFT simulations: 
+        # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
+        run_calc = relax_start_pbe(s, metadata)
 
-    #     # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
-    #     # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
-    #     # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
-    #     # everything but the WAVECAR and POTCAR.
-    #     boto_job = boto_insert(
-    #         self.s3_client,
-    #         run_calc.output, self.bucket_name, 
-    #         )
+        # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
+        # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
+        # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
+        # everything but the WAVECAR and POTCAR.
+        boto_job = boto_insert(
+            s3_client,
+            run_calc.output, self.bucket_name, 
+            )
 
-    #     run_locally([run_calc, boto_job], create_folders=True)
+        run_locally([run_calc, boto_job], create_folders=True)
 
-    # def boto_check(self, mat_id):
-    #     """
-    #     Method to check if a mat_id already exists in the S3 bucket
-    #     """
+    def boto_check(self, mat_id):
+        """
+        Method to check if a mat_id already exists in the S3 bucket
+        """
 
-    #     fkey = '%s/static2/CHGCAR.gz' %(mat_id)
-    #     self.s3_client.head_object(Bucket=self.bucket_name, 
-    #     Key=fkey)
+        fkey = '%s/static2/CHGCAR.gz' %(mat_id)
+        self.s3_client.head_object(Bucket=self.bucket_name, 
+        Key=fkey)
 
 
 @job
