@@ -118,7 +118,7 @@ class RunChgcarWF(PipelineStep):
 
 
         try:
-            self.boto_check(metadata['mat_id'])
+            self.boto_check(metadata['mat_id'], s3_client)
             print('%s already exists in S3, skipping Flow')
             return None
         except botocore.exceptions.ClientError as e:
@@ -147,13 +147,13 @@ class RunChgcarWF(PipelineStep):
 
         run_locally([run_calc, boto_job], create_folders=True)
 
-    def boto_check(self, mat_id):
+    def boto_check(self, mat_id, s3_client):
         """
         Method to check if a mat_id already exists in the S3 bucket
         """
 
         fkey = '%s/static2/CHGCAR.gz' %(mat_id)
-        self.s3_client.head_object(Bucket=self.bucket_name, 
+        s3_client.head_object(Bucket=self.bucket_name, 
         Key=fkey)
 
 
