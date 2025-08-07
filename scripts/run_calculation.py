@@ -224,11 +224,7 @@ def relax_start_pbe(
     complete_flow.update_config({"manager_config": {"_fworker": worker}})
     complete_flow.update_metadata(metadata)
 
-    outputs = {'prev_dir': relax_flow.output, 
-               'metadata': metadata}
-
-    return Response(addition=complete_flow, output=outputs)
-
+    return Response(addition=complete_flow)
 
 def static_calculation(
     structure: Structure,
