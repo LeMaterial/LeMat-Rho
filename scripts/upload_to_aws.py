@@ -23,9 +23,7 @@ from run_calculation import relax_start_pbe
 TODO:
     - Optimize core usage
     - Scrap Boto, use DataTrove for cleaner code
-    - Job as json file, save some kind of record
     - Add a function (or incorporate a method into RunChgcarWF) to get data from HF dataset. 
-    - Add a method to check S3 if data already exists
 """
 
 
@@ -118,15 +116,15 @@ class RunChgcarWF(PipelineStep):
         # check if a mat_id already exists in the S3 bucket
         try:
             mat_id = metadata['mat_id']
-            fkey = '%s/static2/CHGCAR.gz' %(mat_id)
+            fkey = '%s/LeMatRhoStaticMaker/CHGCAR.gz' %(mat_id)
             s3_client.head_object(Bucket=self.bucket_name, 
             Key=fkey)
-            print('%s already exists in S3, skipping Flow')
+            print('%s already exists in S3, skipping Flow' %(fkey))
             return None
         except botocore.exceptions.ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == '404' or error_code == 'NoSuchKey':
-                print('%s does not exists in S3, proceeding with Flow')
+                print('%s does not exists in S3, proceeding with Flow' %(fkey))
                 pass
             else:
                 # For other errors, re-raise or handle as needed
@@ -148,7 +146,7 @@ class RunChgcarWF(PipelineStep):
         self,
         response: Dict[str, Any], 
         metadata: Dict[str, Any],
-        skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
+        skip_files: Optional[list] = ["WAVECAR", "POTCAR", "POTCAR.orig"]) -> Any:
         """
         Inserts Completed VASP calculations into AWS S3 bucket.
 
