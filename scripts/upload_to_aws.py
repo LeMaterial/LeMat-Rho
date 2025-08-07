@@ -239,9 +239,18 @@ class RunChgcarWF(PipelineStep):
             r = response[uuid][1]
             if r.output == None:
                 continue
+                
             doc = r.output.model_dump()
+            vasp_obj = doc['vasp_objects']
+            del doc['vasp_objects']
+            doc['vasp_objects'] = {}
+            for t in vasp_obj.keys():
+                doc['vasp_objects'][str(t)] = vasp_obj[t].as_dict()
+            response_by_task_label[r.output.task_label] = doc
             output_dict[uuid] = doc
-        json.dump(jsanitize(output_dict), open(os.path.join(file_path, 'response_outputs.json'), 'w'), cls=MontyEncoder)
+
+
+        json.dump(output_dict, open(os.path.join(file_path, 'response_outputs.json'), 'w'), cls=MontyEncoder)
         with open(os.path.join(file_path, 'response_outputs.json'), 'rb') as body:
             s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
         fkey = os.path.join(mat_id, 'response_outputs.json')
