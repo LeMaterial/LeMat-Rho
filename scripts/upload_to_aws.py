@@ -1,24 +1,19 @@
-import boto3
 from botocore.exceptions import ClientError
-import botocore.session
 import botocore
 from botocore.client import Config
 
 from datatrove.pipeline.base import PipelineStep
-from datatrove.data import DocumentsPipeline
-from datatrove.io import get_datafolder
 
-from jobflow import Flow, SETTINGS, Response, job, run_locally, Job
+from jobflow import run_locally
 
 from pymatgen.core import Structure
 
-import os, argparse, json, sys, glob
+import os, json, glob
 from typing import Optional, Dict, Any
-from pathlib import Path
 
 from run_calculation import relax_start_pbe
 
-from monty.json import MontyDecoder, MontyEncoder, jsanitize
+from monty.json import MontyEncoder, jsanitize
 
 
 """
@@ -245,7 +240,6 @@ class RunChgcarWF(PipelineStep):
             if r.output == None:
                 continue
             doc = r.output.model_dump()
-            doc = make_json_serializable(doc)
             output_dict[uuid] = doc
         json.dump(jsanitize(output_dict), open(os.path.join(file_path, 'response_outputs.json'), 'w'), cls=MontyEncoder)
         with open(os.path.join(file_path, 'response_outputs.json'), 'rb') as body:
