@@ -226,7 +226,6 @@ def relax_start_pbe(
 
     return Response(addition=complete_flow)
 
-
 def static_calculation(
     structure: Structure,
     metadata: Dict[str, Any],

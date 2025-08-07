@@ -1,26 +1,31 @@
+import boto3
 from botocore.exceptions import ClientError
-import botocore
+import botocore.session
 from botocore.client import Config
 
 from datatrove.pipeline.base import PipelineStep
+from datatrove.data import DocumentsPipeline
+from datatrove.io import get_datafolder
 
-from jobflow import run_locally
+from jobflow import Flow, SETTINGS, Response, job, run_locally, Job
 
 from pymatgen.core import Structure
 
-import os, json, glob
+import os, argparse, json, sys, glob
 from typing import Optional, Dict, Any
+from pathlib import Path
 
 from run_calculation import relax_start_pbe
-
-from monty.json import MontyEncoder, jsanitize
 
 
 """
 TODO:
     - Optimize core usage
+    - Incorporate more output jobs? e.g. DDEC, Lobster? Needs WAVECAR, then deletes WAVECAR
     - Scrap Boto, use DataTrove for cleaner code
+    - Job as json file, save some kind of record
     - Add a function (or incorporate a method into RunChgcarWF) to get data from HF dataset. 
+    - Add a method to check S3 if data already exists
 """
 
 
@@ -79,7 +84,8 @@ class RunChgcarWF(PipelineStep):
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
-        self.metadata_batch = metadata_batch        
+        self.metadata_batch = metadata_batch
+        
 
     def run(self, data, rank=0, world_size=1):
         """
@@ -91,158 +97,71 @@ class RunChgcarWF(PipelineStep):
         """
 
         metadata = self.metadata_batch[rank]
-
-        # make a PMG Structure object from metadata
         s = Structure(
         lattice=[x for y in metadata["lattice_vectors"] for x in y],
         species=metadata["species_at_sites"],
         coords=metadata["cartesian_site_positions"],
         coords_are_cartesian=True,
         )
-        
-        # Create S3 client with credentials
-        session = botocore.session.get_session()
-        s3_client = session.create_client(
-            's3',
-            region_name=self.region_name,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-            config=Config(signature_version='s3v4')
-        )
 
-        # check if a mat_id already exists in the S3 bucket
-        try:
-            mat_id = metadata['mat_id']
-            fkey = '%s/LeMatRhoStaticMaker/CHGCAR.gz' %(mat_id)
-            s3_client.head_object(Bucket=self.bucket_name, 
-            Key=fkey)
-            print('%s already exists in S3, skipping Flow' %(fkey))
-            return None
-        except botocore.exceptions.ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == '404' or error_code == 'NoSuchKey':
-                print('%s does not exists in S3, proceeding with Flow' %(fkey))
-                pass
-            else:
-                # For other errors, re-raise or handle as needed
-                raise
-
-        # Set up a two-step Flow object. boto_job will take the output of the relax_start_pbe job. 
-        # The relax_start_pbe performs 4 DFT simulations: 
-        # pre_static_maker, relax_maker_1, relax_maker_2, static_maker
         run_calc = relax_start_pbe(s, metadata)
-        response = run_locally([run_calc], create_folders=True)
+        boto_job = boto_insert(run_calc.output, self.bucket_name, 
+                                self.aws_access_key_id, self.aws_secret_access_key, 
+                                self.region_name)
 
-        # The boto_insert job will insert 4 sets of VASP calculations (one for each of the 4 
-        # aforementioned DFT simulations). For pre_static_maker, relax_maker_1 and relax_maker_2 
-        # we will only include the vasprun.xml an OUTCAR. For static_maker we will include 
-        # everything but the WAVECAR and POTCAR.
-        self.boto_insert(response, metadata)
+        run_locally([run_calc, boto_job], create_folders=True)
 
-    def boto_insert(
-        self,
-        response: Dict[str, Any], 
-        metadata: Dict[str, Any],
-        skip_files: Optional[list] = ["WAVECAR", "POTCAR", "POTCAR.orig"]) -> Any:
-        """
-        Inserts Completed VASP calculations into AWS S3 bucket.
 
-        file_path:: 
-            directory of the VASP outputs
-        bucket_name:: 
-            name of the bucket
-        object_key:: 
-            string of text to be append to the front of the file, otherwise 
-                the key will just be the full directory. e.g. 
-                /path/to/VASP/calculation/CHGCAR is the Key if no object_key
-                is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
-        """
-        
-        # Create S3 client with credentials
-        session = botocore.session.get_session()
-        s3_client = session.create_client(
-            's3',
-            region_name=self.region_name,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-            config=Config(signature_version='s3v4')
-        )
+@job
+def boto_insert(
+                prev_outputs: Dict[str, Any],
+                bucket_name: str,
+                aws_access_key_id: Optional[str] = None, 
+                aws_secret_access_key: Optional[str] = None, 
+                region_name: Optional[str] = None,
+                skip_files: Optional[list] = ["WAVECAR", "POTCAR"]) -> Any:
+    """
+    Inserts Completed VASP calculations into AWS S3 bucket.
 
-        mat_id = metadata.get("mat_id", None)
+    file_path:: 
+        directory of the VASP outputs
+    bucket_name:: 
+        name of the bucket
+    object_key:: 
+        string of text to be append to the front of the file, otherwise 
+            the key will just be the full directory. e.g. 
+            /path/to/VASP/calculation/CHGCAR is the Key if no object_key
+            is given, otherwise it is /path/to/VASP/calculation/<object_key>_CHGCAR
+    aws_access_key_id::
+        aws access key
+    aws_secret_access_key::
+        aws secret access key
+    region_name::
+        name of region e.g. us-north-1    
+    """
 
-        # sort the job responses by label_task 
-        response_by_task_label = {}
-        for uuid in response.keys():
-            r = response[uuid][1]
-            if r.output == None:
-                continue
-            response_by_task_label[r.output.task_label] = r
-        
-        # insert the first static calc
-        file_path = response_by_task_label['LeMatRhoPreStaticMaker'].output.dir_name.split(':')[-1]
-        for f in glob.glob(os.path.join(file_path, '*')):
-            fname = f.split('/')[-1].replace('.gz', '')
-            if "OUTCAR" not in f and "vasprun.xml" not in f:
-                continue
-            vjob_key = 'LeMatRhoPreStaticMaker'
-            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
-            with open(f, 'rb') as body:
-                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+    file_path = prev_outputs['prev_dir'].dir_name.split(':')[-1]
+    metadata = prev_outputs['metadata']
+    json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
 
-        # insert the first relax calc
-        file_path = response_by_task_label['LeMatRhoRelaxMaker 1'].output.dir_name.split(':')[-1]
-        for f in glob.glob(os.path.join(file_path, '*')):
-            fname = f.split('/')[-1].replace('.gz', '')
-            if "OUTCAR" not in f and "vasprun.xml" not in f:
-                continue
-            vjob_key = 'LeMatRhoRelaxMaker_1'
-            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
-            with open(f, 'rb') as body:
-                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+    session = botocore.session.get_session()
+    
+    # Create S3 client with credentials
+    s3 = session.create_client(
+        's3',
+        region_name=region_name,
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        config=Config(signature_version='s3v4')
+    )
 
-        # insert the second relax calc
-        file_path = response_by_task_label['LeMatRhoRelaxMaker 2'].output.dir_name.split(':')[-1]
-        for f in glob.glob(os.path.join(file_path, '*')):
-            fname = f.split('/')[-1].replace('.gz', '')
-            if "OUTCAR" not in f and "vasprun.xml" not in f:
-                continue
-            vjob_key = 'LeMatRhoRelaxMaker_2'
-            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
-            with open(f, 'rb') as body:
-                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+    mat_id = metadata.get("mat_id", None)
 
-        # insert the second static calc
-        file_path = response_by_task_label['LeMatRhoStaticMaker'].output.dir_name.split(':')[-1]
-        for f in glob.glob(os.path.join(file_path, '*')):
-            fname = f.split('/')[-1].replace('.gz', '')
-            if fname in skip_files:
-                continue
-            vjob_key = 'LeMatRhoStaticMaker'
-            fkey = os.path.join(mat_id, vjob_key, f.split('/')[-2:][1])
-            with open(f, 'rb') as body:
-                s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-            print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
-
-        # insert metadata
-        json.dump(metadata, open(os.path.join(file_path, 'metadata.json'), 'w'))
-        with open(os.path.join(file_path, 'metadata.json'), 'rb') as body:
-            s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-        fkey = os.path.join(mat_id, 'metadata.json')
-        print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
-
-        # insert jobflow outputs 
-        output_dict = {}
-        for uuid in response.keys():
-            r = response[uuid][1]
-            if r.output == None:
-                continue
-            doc = r.output.model_dump()
-            output_dict[uuid] = doc
-        json.dump(jsanitize(output_dict), open(os.path.join(file_path, 'response_outputs.json'), 'w'), cls=MontyEncoder)
-        with open(os.path.join(file_path, 'response_outputs.json'), 'rb') as body:
-            s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
-        fkey = os.path.join(mat_id, 'response_outputs.json')
-        print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
+    for f in glob.glob(os.path.join(file_path, '*')):
+        fname = f.split('/')[-1].replace('.gz', '')
+        if fname in skip_files:
+            continue
+        fkey = os.path.join(mat_id, f.split('/')[-2:][0], f.split('/')[-2:][1])
+        with open(f, 'rb') as body:
+            s3.put_object(Bucket=bucket_name, Body=body, Key=fkey)
+        print(f"File '{f}' uploaded to s3://{bucket_name}/{fkey}")
