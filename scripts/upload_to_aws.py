@@ -18,6 +18,8 @@ from pathlib import Path
 
 from run_calculation import relax_start_pbe
 
+from monty.json import MontyDecoder, MontyEncoder, jsanitize
+
 
 """
 TODO:
@@ -245,35 +247,8 @@ class RunChgcarWF(PipelineStep):
             doc = r.output.model_dump()
             doc = make_json_serializable(doc)
             output_dict[uuid] = doc
-        json.dump(output_dict, open(os.path.join(file_path, 'response_outputs.json'), 'w'))        
+        json.dump(jsanitize(output_dict), open(os.path.join(file_path, 'response_outputs.json'), 'w'), cls=MontyEncoder)
         with open(os.path.join(file_path, 'response_outputs.json'), 'rb') as body:
             s3_client.put_object(Bucket=self.bucket_name, Body=body, Key=fkey)
         fkey = os.path.join(mat_id, 'response_outputs.json')
         print(f"File '{f}' uploaded to s3://{self.bucket_name}/{fkey}")
-
-
-import datetime
-from pymatgen.core.periodic_table import Element
-from pymatgen.core.structure import Composition
-from emmet.core.symmetry import CrystalSystem
-
-def make_json_serializable(obj):
-    if isinstance(obj, dict):
-        # Convert keys to str (or another string representation) and recursively convert values
-        return {str(k): make_json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [make_json_serializable(i) for i in obj]
-    elif isinstance(obj, datetime.datetime):
-        return obj.isoformat()
-    elif isinstance(obj, datetime.date):
-        return obj.isoformat()
-    elif isinstance(obj, Element):
-        return str(obj)
-    elif isinstance(obj, Composition):
-        return obj.as_dict()
-    elif isinstance(obj, CrystalSystem):
-        return str(obj)
-    
-    # Add additional custom conversions here, e.g., for sets, bytes, custom objects, etc.
-    else:
-        return str(obj)
