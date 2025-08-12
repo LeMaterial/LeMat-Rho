@@ -69,5 +69,5 @@ if __name__=="__main__":
         cpus_per_task=cpus_per_task,
         tasks=len(metadata_batch),
         max_array_launch_parallel=True,
-        time="03:00:00",
+        time="48:00:00",
     ).run()
