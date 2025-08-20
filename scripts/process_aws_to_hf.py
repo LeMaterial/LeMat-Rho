@@ -52,7 +52,7 @@ def pymatgen_to_optimade(pmg_structure: Structure):
     data["nperiodic_dimensions"] = 3
     data["lattice_vectors"] = pmg_structure.lattice.matrix
     data["cartesian_site_positions"] = pmg_structure.cart_coords
-    data["species_at_sites"] = [x.name for x in pmg_structure.elements]
+    data["species_at_sites"] = [x.species.elements[0].name for x in pmg_structure]
     return data
 
 
