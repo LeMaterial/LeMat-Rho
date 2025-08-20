@@ -1,11 +1,11 @@
-''' 
+"""
 HF DataFrame Rows
 
 | ID | LeMat-Bulk ID | BAWL Hash | Functional | Lattice Vectors |
 | Species at Sites | Cartesian Site Positions | Normalized charge density |
 | Normalized AECCAR0 | Normalized AECCAR1 | Normalized AECCAR2 |
 | Bader Charge Partition | DDEC6 Charge Partition |
-'''
+"""
 
 import boto3
 import gzip
@@ -15,38 +15,44 @@ import pandas as pd
 
 from pymatgen.io.vasp import Chgcar
 from pymatgen.core import Structure
+from pymatgen.command_line.bader_caller import BaderAnalysis
 
-import tempfile
+from monty.tempfile import ScratchDir
 import numpy as np
 from datasets import Dataset
 
 from pyrho.charge_density import ChargeDensity
 from material_hasher.hasher.bawl import BAWLHasher
 
+from pymatgen.io.vasp import Potcar, Vasprun
+import subprocess
+import sys
+from pymatgen.io.vasp.sets import MatPESStaticSet
+
+
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_BUCKET_NAME = "lemat-rho"
 
+PERL_CHGCARSUM_FILE = "/Users/martinsiron/Downloads/vtstscripts-1034/chgsum.pl"
+BADER_PATH = "/Users/martinsiron/Downloads/bader_osx"  # bader executable
+
 
 def pymatgen_to_optimade(pmg_structure: Structure):
     data = {}
-    data['elements'] = pmg_structure.chemical_system_set
-    data['nsites'] = len(pmg_structure)
-    data['chemical_formula_anonymous'] = (
-        pmg_structure.composition.anonymized_formula
-    )
-    data['chemical_formula_reduced'] = (
+    data["elements"] = pmg_structure.chemical_system_set
+    data["nsites"] = len(pmg_structure)
+    data["chemical_formula_anonymous"] = pmg_structure.composition.anonymized_formula
+    data["chemical_formula_reduced"] = (
         pmg_structure.composition.reduced_composition.to_pretty_string()
     )
-    data['chemical_formula_descriptive'] = (
-        pmg_structure.composition.to_pretty_string()
-    )
-    data['nelements'] = len(pmg_structure.chemical_system_set)
-    data['dimension_types'] = [1, 1, 1]
-    data['nperiodic_dimensions'] = 3
-    data['lattice_vectors'] = pmg_structure.lattice.matrix
-    data['cartesian_site_positions'] = pmg_structure.cart_coords
-    data['species_at_sites'] = [x.name for x in pmg_structure.elements]
+    data["chemical_formula_descriptive"] = pmg_structure.composition.to_pretty_string()
+    data["nelements"] = len(pmg_structure.chemical_system_set)
+    data["dimension_types"] = [1, 1, 1]
+    data["nperiodic_dimensions"] = 3
+    data["lattice_vectors"] = pmg_structure.lattice.matrix
+    data["cartesian_site_positions"] = pmg_structure.cart_coords
+    data["species_at_sites"] = [x.name for x in pmg_structure.elements]
     return data
 
 
@@ -108,38 +114,55 @@ def stream_gz_file_from_aws_bucket(s3_key, processor_cls, **processor_kwargs):
     return processor
 
 
+# calc_type = 'LeMatRhoRelaxMaker_1'
+def stream_gz_folder_from_aws_bucket(
+    folder, files, calculation_type="LeMatRhoStaticMaker"
+):
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    )
+    for file in files:
+        response = s3.get_object(
+            Bucket=AWS_BUCKET_NAME, Key=os.path.join(folder, calculation_type, file)
+        )
+        gzipped_body = gzip.GzipFile(fileobj=response["Body"])
+        buffered_reader = io.BufferedReader(gzipped_body)
+        with open(file.split(".")[0], "w") as fh:
+            fh.write(buffered_reader.read().decode("utf-8"))
+
+
 class CubeProcessor:
     def __init__(
         self,
-        file_obj,
+        file_name,
         cube_class,
         key,
-        pgrid_key='total',
+        pgrid_key="total",
         compression_shape=[200, 200, 200],
     ):
         self.cube_class = cube_class
-        self.file_obj = file_obj
+        self.file_name = file_name
         self.pgrid_key = pgrid_key
         self.compression_shape = compression_shape
         self._hf_data = {}
         # Files in our bucket are gzipped CHGCAR-like text files
-        with tempfile.NamedTemporaryFile(delete=False, mode="w") as tmp:
-            tmp.write(file_obj.read().decode('utf-8'))
 
-            self.cube_obj = cube_class.from_file(
-                tmp.name
-            )
+        self.cube_obj = cube_class.from_file(file_name)
         self.key = key
 
     def process(self):
         density = ChargeDensity.from_pmg(self.cube_obj)
         pgrid = density.pgrids[self.pgrid_key]
-        self._hf_data.update({
-            f'{self.key}': density.pgrids[self.pgrid_key].grid_data,
-            'compressed_charge_density': (
-                pgrid.lossy_smooth_compression(self.compression_shape)
-            ),
-        })
+        self._hf_data.update(
+            {
+                f"{self.key}": density.pgrids[self.pgrid_key].grid_data,
+                "compressed_charge_density": (
+                    pgrid.lossy_smooth_compression(self.compression_shape)
+                ),
+            }
+        )
 
     @property
     def grid_3d(self):
@@ -147,35 +170,17 @@ class CubeProcessor:
         return density.pgrids[self.pgrid_key].grid_data
 
 
-class AeccarProcessor(CubeProcessor):
-    def __init__(
-        self,
-        file_obj,
-        key='aeccar0',
-        cube_class=Chgcar,
-        pgrid_key='total',
-        compression_shape=[20, 20, 20],
-    ):
-        super().__init__(
-            file_obj,
-            cube_class=cube_class,
-            key=key,
-            pgrid_key=pgrid_key,
-            compression_shape=compression_shape,
-        )
-
-
 class ChgCarProcessor(CubeProcessor):
     def __init__(
         self,
-        file_obj,
-        key='charge_density',
+        file_name,
+        key="charge_density",
         cube_class=Chgcar,
-        pgrid_key='total',
+        pgrid_key="total",
         compression_shape=[15, 15, 15],
     ):
         super().__init__(
-            file_obj,
+            file_name,
             cube_class=cube_class,
             key=key,
             pgrid_key=pgrid_key,
@@ -204,45 +209,59 @@ if __name__ == "__main__":
 
     data = []
     for material_id in material_ids:
-        try:
-            print(f'processing {material_id}')
-            row = {}
-            row.update({'immutable_id': material_id})
-            # Normalized charge density
-            chgcar = stream_gz_file_from_aws_bucket(
-                s3_key=f"{material_id}/LeMatRhoStaticMaker/CHGCAR.gz",
-                processor_cls=ChgCarProcessor,
-                key='charge_density',
-            )
-            chgcar.process()
-            row['bawl_hasher'] = bh.get_material_hash(chgcar.cube_obj.structure)
-            row.update(pymatgen_to_optimade(chgcar.cube_obj.structure))
-            row['compressed_charge_density'] = chgcar.grid_3d
-            aeccar0 = stream_gz_file_from_aws_bucket(
-                s3_key=f"{material_id}/LeMatRhoStaticMaker/AECCAR0.gz",
-                processor_cls=ChgCarProcessor,
-                key='aeccar0',
-            )
-            aeccar0.process()
-            row['compressed_aeccar0_density'] = chgcar.grid_3d
-            aeccar0 = stream_gz_file_from_aws_bucket(
-                s3_key=f"{material_id}/LeMatRhoStaticMaker/AECCAR1.gz",
-                processor_cls=ChgCarProcessor,
-                key='aeccar1',
-            )
-            aeccar0.process()
-            row['compressed_aeccar1_density'] = chgcar.grid_3d
-            aeccar0 = stream_gz_file_from_aws_bucket(
-                s3_key=f"{material_id}/LeMatRhoStaticMaker/AECCAR2.gz",
-                processor_cls=ChgCarProcessor,
-                key='aeccar2',
-            )
-            aeccar0.process()
-            row['compressed_aeccar2_density'] = chgcar.grid_3d
-            data.append(row)
-        except:
-            print(f"failed on {material_id}")
-            continue
+        with ScratchDir('.', ) as sd:
+            try:
+                print(f"processing {material_id}")
+                row = {}
+                row.update({"immutable_id": material_id})
+                # Download files
+
+                stream_gz_folder_from_aws_bucket(
+                    material_id, ["vasprun.xml.gz"], calculation_type="LeMatRhoRelaxMaker_1"
+                )
+                stream_gz_folder_from_aws_bucket(
+                    material_id,
+                    ["CHGCAR.gz", "AECCAR0.gz", "AECCAR1.gz", "AECCAR2.gz"],
+                )
+
+                # Process CHGCAR:
+                chgcar = ChgCarProcessor("CHGCAR", cube_class=Chgcar)
+                chgcar.process()
+                row["bawl_hasher"] = bh.get_material_hash(chgcar.cube_obj.structure)
+                row.update(pymatgen_to_optimade(chgcar.cube_obj.structure))
+                row["compressed_charge_density"] = chgcar.grid_3d
+
+                aeccar0 = ChgCarProcessor("AECCAR0", cube_class=Chgcar)
+                aeccar0.process()
+                row["compressed_aeccar0_density"] = chgcar.grid_3d
+
+                aeccar1 = ChgCarProcessor("AECCAR1", cube_class=Chgcar)
+                aeccar1.process()
+                row["compressed_aeccar1_density"] = aeccar1.grid_3d
+
+                aeccar2 = ChgCarProcessor("AECCAR2", cube_class=Chgcar)
+                aeccar2.process()
+                row["compressed_aeccar2_density"] = aeccar2.grid_3d
+
+                ## Bader Charge Partitioning
+                MatPESStaticSet(Vasprun("vasprun").structures[0]).potcar.write_file("POTCAR")
+                params = ["AECCAR0", "AECCAR2"]
+                perl_script = subprocess.Popen(
+                    [PERL_CHGCARSUM_FILE, *params], stdout=sys.stdout
+                )
+                perl_script.communicate()
+                ba = BaderAnalysis(
+                    os.path.join(os.getcwd(), "CHGCAR"),
+                    os.path.join(os.getcwd(), "POTCAR"),
+                    chgref_filename=os.path.join(os.getcwd(), "CHGCAR_sum"),
+                    bader_path=BADER_PATH,
+                )
+                row["bader_charges"] = ba.get_charge_decorated_structure().site_properties[
+                    "charge"
+                ]
+                data.append(row)
+            except:
+                continue
 
     df = pd.DataFrame(data)
-    push_dataframe_to_hf_dataset(df, 'lematerial/LeMat-Rho', private=True)
+    push_dataframe_to_hf_dataset(df, "lematerial/LeMat-Rho", private=True)
