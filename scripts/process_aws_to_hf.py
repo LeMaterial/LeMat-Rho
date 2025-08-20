@@ -16,6 +16,7 @@ import pandas as pd
 from pymatgen.io.vasp import Chgcar
 from pymatgen.core import Structure
 from pymatgen.command_line.bader_caller import BaderAnalysis
+from pymatgen.command_line.chargemol_caller import ChargemolAnalysis
 
 from monty.tempfile import ScratchDir
 import numpy as np
@@ -24,7 +25,7 @@ from datasets import Dataset
 from pyrho.charge_density import ChargeDensity
 from material_hasher.hasher.bawl import BAWLHasher
 
-from pymatgen.io.vasp import Potcar, Vasprun
+from pymatgen.io.vasp import Vasprun
 import subprocess
 import sys
 from pymatgen.io.vasp.sets import MatPESStaticSet
@@ -36,6 +37,8 @@ AWS_BUCKET_NAME = "lemat-rho"
 
 PERL_CHGCARSUM_FILE = "/Users/martinsiron/Downloads/vtstscripts-1034/chgsum.pl"
 BADER_PATH = "/Users/martinsiron/Downloads/bader_osx"  # bader executable
+
+ATOMIC_DENSITIES_PATH = "/Users/martinsiron/Downloads/chargemol_09_26_2017/atomic_densities"
 
 
 def pymatgen_to_optimade(pmg_structure: Structure):
@@ -208,9 +211,8 @@ if __name__ == "__main__":
                 material_ids.append(prefix["Prefix"][:-1])
 
     data = []
-    for material_id in material_ids:
-        with ScratchDir('.', ) as sd:
-            try:
+    for material_id in material_ids[:1]:
+                # with ScratchDir('.', ) as sd:
                 print(f"processing {material_id}")
                 row = {}
                 row.update({"immutable_id": material_id})
@@ -227,7 +229,7 @@ if __name__ == "__main__":
                 # Process CHGCAR:
                 chgcar = ChgCarProcessor("CHGCAR", cube_class=Chgcar)
                 chgcar.process()
-                row["bawl_hasher"] = bh.get_material_hash(chgcar.cube_obj.structure)
+                row["bawl_hash"] = bh.get_material_hash(chgcar.cube_obj.structure)
                 row.update(pymatgen_to_optimade(chgcar.cube_obj.structure))
                 row["compressed_charge_density"] = chgcar.grid_3d
 
@@ -259,9 +261,9 @@ if __name__ == "__main__":
                 row["bader_charges"] = ba.get_charge_decorated_structure().site_properties[
                     "charge"
                 ]
-                data.append(row)
-            except:
-                continue
+                row["bader_atomic_volume"] = ba.summary['atomic_volume']
 
-    df = pd.DataFrame(data)
-    push_dataframe_to_hf_dataset(df, "lematerial/LeMat-Rho", private=True)
+                data.append(row)
+
+    # df = pd.DataFrame(data)
+    # push_dataframe_to_hf_dataset(df, "lematerial/LeMat-Rho", private=True)
