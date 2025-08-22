@@ -29,7 +29,8 @@ so this first does a PBE static calculation, then a meta-GGA static calculation.
 #  too many LargeSigmaHandler errors
 INCAR_CHANGES_DEFAULT = {
     "GGA_COMPAT": False,
-    "SIGMA": 0.03
+    "SIGMA": 0.03,
+    "ISEARCH": 1, #new line-search algorithm used during the direct minimization of the electronic structure (ALGO = All)
 }
 
 
