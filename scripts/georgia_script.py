@@ -10,9 +10,9 @@ def read_options():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-c", "--cpus_per_task", dest="cpus_per_task", type=str, 
-                        help="cpus_per_task")
+                        help="cpus_per_task", default=2)
     parser.add_argument("-p", "--partition", dest="partition", type=str, 
-                        help="partition")
+                        help="partition", default="hopper-cpu")
     parser.add_argument("-t", "--time", dest="time", type=str, 
                         help="time")
     parser.add_argument("-b", "--bucket_name", dest="bucket_name", type=str, 
@@ -43,12 +43,14 @@ if __name__=="__main__":
     cpus_per_task = args.cpus_per_task
     partition = args.partition
     t = args.time
-    all_env_commands = ["conda activate rho", 'source %s' %(args.env_command), # @Georgia, please check if this was the correct sequence to run the environment activation
+    all_env_commands = ["conda activate rho", # @Georgia, please check if this is the correct way to soruce the envs
+                        'source /fsx/georgia_channing/LeMat-Rho/.venv/bin/activate' %(args.env_command), # @Georgia, please check path
                         'export PATH=/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/bin:$PATH',
                         'export PATH=/fsx/georgia_channing/VASP/exe/vasp6.4.3_cml/Linux-x86_64:$PATH',
                         'export LD_LIBRARY_PATH=/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/libfabric/lib/prov:/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/libfabric/lib:/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/lib:$LD_LIBRARY_PATH',
                         'which vasp_std',
-                        'which mpirun'
+                        'which mpirun',
+                        'export VASP_CMD="mpirun /fsx/georgia_channing/VASP/exe/vasp6.4.3_cml/Linux-x86_64/vasp_std"'
                        ]
     env_command =' && '.join(all_env_commands)
     
