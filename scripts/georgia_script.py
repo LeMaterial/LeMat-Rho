@@ -10,7 +10,7 @@ def read_options():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-c", "--cpus_per_task", dest="cpus_per_task", type=str, 
-                        help="cpus_per_task", default=2)
+                        help="cpus_per_task", default=8)
     parser.add_argument("-p", "--partition", dest="partition", type=str, 
                         help="partition", default="hopper-cpu")
     parser.add_argument("-t", "--time", dest="time", type=str, 
@@ -50,7 +50,7 @@ if __name__=="__main__":
                         'export LD_LIBRARY_PATH=/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/libfabric/lib/prov:/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/libfabric/lib:/fsx/georgia_channing/VASP/exe/IntelMPI2019/Linux-x86_64/lib:$LD_LIBRARY_PATH',
                         'which vasp_std',
                         'which mpirun',
-                        'export VASP_CMD="mpirun /fsx/georgia_channing/VASP/exe/vasp6.4.3_cml/Linux-x86_64/vasp_std"'
+                        'export VASP_CMD="mpirun -np %s /fsx/georgia_channing/VASP/exe/vasp6.4.3_cml/Linux-x86_64/vasp_std"' %(cpus_per_task)
                        ]
     env_command =' && '.join(all_env_commands)
     
