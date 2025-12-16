@@ -126,7 +126,7 @@ def relax_start_pbe(
     structure: Structure,
     metadata: Dict[str, Any],
     KPAR: int = 2,
-    NCORE: int = 2,
+    NCORE: int = 4,
     worker: Optional[str] = None,
 ) -> None:
     """
