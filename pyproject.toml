@@ -3,13 +3,20 @@ name = "lemat-rho"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "ase>=3.25.0",
     "ipykernel>=6.29.5",
-    "material-hasher",
-    "atomate2",
+    "atomate2>=0.0.16",
     "fireworks",
+]
+
+[project.optional-dependencies]
+# For notebooks that use BAWL hasher / structure similarity (process_matpes, outofequilibrium_id).
+# Requires pymatgen>=2024.11.13; skip on PyPI mirrors that don't have it (e.g. CINES gorgone).
+hasher = [
+    "material-hasher @ git+https://github.com/LeMaterial/lematerial-hasher.git",
+    "pymatgen>=2024.11.13",
 ]
 
 [tool.uv.sources]

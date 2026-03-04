@@ -1,3 +1,5 @@
+import os
+
 import atomate2  # noqa: F401
 from jobflow import SETTINGS  # noqa: F401
 from jobflow.core.store import JobStore
@@ -27,7 +29,13 @@ def get_submitted_ids() -> set:
     Returns:
         set: Set of submitted mat_id strings.
     """
-    lpad = LaunchPad.from_file("/home/sjonathan/atomate/config/lematrho_launchpad.yaml")
+    launchpad_path = os.environ.get(
+        "LEMATRHO_LAUNCHPAD_YAML",
+        "/home/sjonathan/atomate/config/lematrho_launchpad.yaml",
+    )
+    if not os.path.isfile(launchpad_path):
+        return set()
+    lpad = LaunchPad.from_file(launchpad_path)
     query_filter = {"spec.mat_id": {"$exists": True}}
     return_fields = {"spec.mat_id": 1, "_id": 0}
     results = lpad.fireworks.find(query_filter, return_fields)
