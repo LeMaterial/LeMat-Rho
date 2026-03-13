@@ -10,6 +10,11 @@ dependencies = [
     "material-hasher",
     "atomate2",
     "fireworks",
+    "e3nn>=0.6.0",
+    "scipy>=1.16.0",
+    "lz4>=4.4.5",
+    "pyarrow>=20.0.0",
+    "pandas>=2.3.0",
 ]
 
 [tool.uv.sources]
