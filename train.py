@@ -20,6 +20,8 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+import wandb
+from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
 # charge3net imports (for the LR scheduler)
@@ -50,14 +52,28 @@ def compute_nmape(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     return nmape.mean()
 
 
-def train_one_epoch(model, train_loader, optimizer, scheduler, device, log_every=50):
-    """Run one training epoch, return average loss."""
+def compute_rmse(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """Root Mean Squared Error, averaged over the batch."""
+    mse = ((targets - preds) ** 2).mean(dim=1)
+    return mse.sqrt().mean()
+
+
+def compute_nrmse(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """Normalized RMSE (%) — RMSE / mean(|target|) * 100, per-sample then averaged."""
+    mse = ((targets - preds) ** 2).mean(dim=1)
+    rmse = mse.sqrt()
+    nrmse = rmse / (torch.abs(targets).mean(dim=1) + 1e-10) * 100.0
+    return nrmse.mean()
+
+
+def train_one_epoch(model, train_loader, optimizer, scheduler, device, global_step,
+                    log_every=50, use_wandb=False):
+    """Run one training epoch, return (average loss, updated global_step)."""
     model.train()
     total_loss = 0.0
     n_batches = 0
 
     for i, batch in enumerate(train_loader):
-        # Move tensors to device
         batch = {
             k: v.to(device) if isinstance(v, torch.Tensor) else v
             for k, v in batch.items()
@@ -73,20 +89,25 @@ def train_one_epoch(model, train_loader, optimizer, scheduler, device, log_every
 
         total_loss += loss.item()
         n_batches += 1
+        global_step += 1
 
         if (i + 1) % log_every == 0:
             lr = optimizer.param_groups[0]["lr"]
             print(f"  step {i+1}: loss={loss.item():.6f}  lr={lr:.2e}")
+            if use_wandb:
+                wandb.log({"train/loss_step": loss.item(), "lr": lr}, step=global_step)
 
-    return total_loss / max(n_batches, 1)
+    return total_loss / max(n_batches, 1), global_step
 
 
 @torch.no_grad()
 def validate(model, val_loader, device):
-    """Run validation, return average L1 loss and NMAPE."""
+    """Run validation, return average L1 loss, NMAPE, RMSE, and NRMSE."""
     model.eval()
     total_loss = 0.0
     total_nmape = 0.0
+    total_rmse = 0.0
+    total_nrmse = 0.0
     n_batches = 0
 
     for batch in val_loader:
@@ -96,16 +117,20 @@ def validate(model, val_loader, device):
         }
 
         preds = model(batch)
-        loss = F.l1_loss(preds, batch["probe_target"])
-        nmape = compute_nmape(preds, batch["probe_target"])
-
-        total_loss += loss.item()
-        total_nmape += nmape.item()
+        targets = batch["probe_target"]
+        total_loss += F.l1_loss(preds, targets).item()
+        total_nmape += compute_nmape(preds, targets).item()
+        total_rmse += compute_rmse(preds, targets).item()
+        total_nrmse += compute_nrmse(preds, targets).item()
         n_batches += 1
 
-    avg_loss = total_loss / max(n_batches, 1)
-    avg_nmape = total_nmape / max(n_batches, 1)
-    return avg_loss, avg_nmape
+    denom = max(n_batches, 1)
+    return {
+        "L1": total_loss / denom,
+        "NMAPE": total_nmape / denom,
+        "RMSE": total_rmse / denom,
+        "NRMSE": total_nrmse / denom,
+    }
 
 
 def save_checkpoint(model, optimizer, scheduler, epoch, best_nmape, path):
@@ -123,6 +148,8 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_nmape, path):
 
 
 def main():
+    load_dotenv()  # load .env (WANDB_API_KEY, etc.)
+
     parser = argparse.ArgumentParser(description="Fine-tune ChargE3Net on LeMatRho")
     parser.add_argument(
         "--parquet-dir",
@@ -156,6 +183,9 @@ def main():
         default=None,
         help="Force device (cpu, cuda, mps). Auto-detect if not set.",
     )
+    parser.add_argument("--wandb-project", type=str, default="lemat-rho-charge3net")
+    parser.add_argument("--wandb-entity", type=str, default="dtts")
+    parser.add_argument("--no-wandb", action="store_true", help="Disable W&B logging")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -168,6 +198,15 @@ def main():
     else:
         device = torch.device("cpu")
     print(f"Using device: {device}")
+
+    # W&B
+    use_wandb = not args.no_wandb and not args.smoke_test
+    if use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=vars(args),
+        )
 
     # Data
     print("Building dataloaders...")
@@ -231,15 +270,31 @@ def main():
         model.train()
         for epoch in range(1, args.epochs + 1):
             preds = model(fixed_batch)
-            loss = F.l1_loss(preds, fixed_batch["probe_target"])
+            targets = fixed_batch["probe_target"]
+            loss = F.l1_loss(preds, targets)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            nmape = compute_nmape(preds, fixed_batch["probe_target"])
-            print(f"Epoch {epoch:>4d}/{args.epochs}  L1={loss.item():.6f}  NMAPE={nmape.item():.2f}%")
+            nmape = compute_nmape(preds, targets)
+            rmse = compute_rmse(preds, targets)
+            nrmse = compute_nrmse(preds, targets)
+            print(
+                f"Epoch {epoch:>4d}/{args.epochs}  L1={loss.item():.6f}  "
+                f"NMAPE={nmape.item():.2f}%  RMSE={rmse.item():.4f}  NRMSE={nrmse.item():.2f}%"
+            )
+            if use_wandb:
+                wandb.log({
+                    "overfit/L1": loss.item(),
+                    "overfit/NMAPE": nmape.item(),
+                    "overfit/RMSE": rmse.item(),
+                    "overfit/NRMSE": nrmse.item(),
+                    "epoch": epoch,
+                })
 
         print("\nOverfit test complete.")
+        if use_wandb:
+            wandb.finish()
         return
 
     # -----------------------------------------------------------------------
@@ -253,26 +308,40 @@ def main():
     save_dir.mkdir(parents=True, exist_ok=True)
     best_nmape = float("inf")
 
+    global_step = 0
     print(f"\nStarting training for {args.epochs} epochs...")
     for epoch in range(args.epochs):
         t0 = time.time()
-        train_loss = train_one_epoch(
-            model, train_loader, optimizer, scheduler, device, log_every=args.log_every
+        train_loss, global_step = train_one_epoch(
+            model, train_loader, optimizer, scheduler, device, global_step,
+            log_every=args.log_every, use_wandb=use_wandb,
         )
-        val_loss, val_nmape = validate(model, val_loader, device)
+        val = validate(model, val_loader, device)
         elapsed = time.time() - t0
 
         print(
             f"Epoch {epoch+1}/{args.epochs}  "
             f"train_L1={train_loss:.6f}  "
-            f"val_L1={val_loss:.6f}  "
-            f"val_NMAPE={val_nmape:.2f}%  "
+            f"val_L1={val['L1']:.6f}  "
+            f"val_NMAPE={val['NMAPE']:.2f}%  "
+            f"val_RMSE={val['RMSE']:.4f}  "
+            f"val_NRMSE={val['NRMSE']:.2f}%  "
             f"time={elapsed:.0f}s"
         )
 
+        if use_wandb:
+            wandb.log({
+                "train/L1": train_loss,
+                "val/L1": val["L1"],
+                "val/NMAPE": val["NMAPE"],
+                "val/RMSE": val["RMSE"],
+                "val/NRMSE": val["NRMSE"],
+                "epoch": epoch + 1,
+            }, step=global_step)
+
         # Save best checkpoint
-        if val_nmape < best_nmape:
-            best_nmape = val_nmape
+        if val["NMAPE"] < best_nmape:
+            best_nmape = val["NMAPE"]
             save_checkpoint(
                 model, optimizer, scheduler, epoch, best_nmape, save_dir / "best.pt"
             )
@@ -285,6 +354,8 @@ def main():
 
     print(f"\nTraining complete. Best NMAPE: {best_nmape:.2f}%")
     print(f"Checkpoints saved to {save_dir}")
+    if use_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":
