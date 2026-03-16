@@ -186,6 +186,9 @@ def main():
     parser.add_argument("--wandb-project", type=str, default="lemat-rho-charge3net")
     parser.add_argument("--wandb-entity", type=str, default="dtts")
     parser.add_argument("--no-wandb", action="store_true", help="Disable W&B logging")
+    parser.add_argument("--wandb-mode", type=str, default="online",
+                        choices=["online", "offline", "disabled"],
+                        help="W&B mode (use 'offline' on air-gapped clusters)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -206,6 +209,8 @@ def main():
             project=args.wandb_project,
             entity=args.wandb_entity,
             config=vars(args),
+            settings=wandb.Settings(init_timeout=300),
+            mode=args.wandb_mode,
         )
 
     # Data

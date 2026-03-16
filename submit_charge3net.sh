@@ -34,6 +34,7 @@ python train.py \
     --val-probes 1000 \
     --num-workers 8 \
     --wandb-project lemat-rho-charge3net \
-    --wandb-entity dtts
+    --wandb-entity dtts \
+    --wandb-mode offline
 
 echo "Done. Exit code: $?"
