@@ -23,6 +23,12 @@ cd $SCRATCH/LeMat-Rho
 export $(grep -v '^#' .env | xargs)
 
 # --- Train ---
+RESUME_FLAG=""
+if [ -f "$SCRATCH/charge3net_checkpoints/latest.pt" ]; then
+    RESUME_FLAG="--resume-from $SCRATCH/charge3net_checkpoints/latest.pt"
+    echo "Resuming from $SCRATCH/charge3net_checkpoints/latest.pt"
+fi
+
 python train.py \
     --parquet-dir $SCRATCH/charge3net_data/lematrho_full_10x10x10 \
     --ckpt-path $SCRATCH/charge3net/models/charge3net_mp.pt \
@@ -35,6 +41,7 @@ python train.py \
     --num-workers 8 \
     --wandb-project lemat-rho-charge3net \
     --wandb-entity dtts \
-    --wandb-mode offline
+    --wandb-mode offline \
+    $RESUME_FLAG
 
 echo "Done. Exit code: $?"

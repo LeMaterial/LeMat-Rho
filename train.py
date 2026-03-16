@@ -133,7 +133,7 @@ def validate(model, val_loader, device):
     }
 
 
-def save_checkpoint(model, optimizer, scheduler, epoch, best_nmape, path):
+def save_checkpoint(model, optimizer, scheduler, epoch, best_nmape, global_step, path):
     """Save training checkpoint."""
     torch.save(
         {
@@ -142,9 +142,23 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_nmape, path):
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "best_nmape": best_nmape,
+            "global_step": global_step,
         },
         path,
     )
+
+
+def load_checkpoint(path, model, optimizer, scheduler, device):
+    """Load training checkpoint, return (start_epoch, best_nmape, global_step)."""
+    ckpt = torch.load(path, map_location=device, weights_only=False)
+    model.model.load_state_dict(ckpt["model"])
+    optimizer.load_state_dict(ckpt["optimizer"])
+    scheduler.load_state_dict(ckpt["scheduler"])
+    start_epoch = ckpt["epoch"] + 1
+    best_nmape = ckpt["best_nmape"]
+    global_step = ckpt.get("global_step", 0)
+    print(f"Resumed from checkpoint: epoch {start_epoch}, best_nmape={best_nmape:.2f}%, step={global_step}")
+    return start_epoch, best_nmape, global_step
 
 
 def main():
@@ -183,6 +197,8 @@ def main():
         default=None,
         help="Force device (cpu, cuda, mps). Auto-detect if not set.",
     )
+    parser.add_argument("--resume-from", type=str, default=None,
+                        help="Path to training checkpoint (latest.pt) to resume from")
     parser.add_argument("--wandb-project", type=str, default="lemat-rho-charge3net")
     parser.add_argument("--wandb-entity", type=str, default="dtts")
     parser.add_argument("--no-wandb", action="store_true", help="Disable W&B logging")
@@ -314,8 +330,15 @@ def main():
     best_nmape = float("inf")
 
     global_step = 0
-    print(f"\nStarting training for {args.epochs} epochs...")
-    for epoch in range(args.epochs):
+    start_epoch = 0
+
+    if args.resume_from:
+        start_epoch, best_nmape, global_step = load_checkpoint(
+            args.resume_from, model, optimizer, scheduler, device,
+        )
+
+    print(f"\nStarting training from epoch {start_epoch + 1} to {args.epochs}...")
+    for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         train_loss, global_step = train_one_epoch(
             model, train_loader, optimizer, scheduler, device, global_step,
@@ -348,13 +371,15 @@ def main():
         if val["NMAPE"] < best_nmape:
             best_nmape = val["NMAPE"]
             save_checkpoint(
-                model, optimizer, scheduler, epoch, best_nmape, save_dir / "best.pt"
+                model, optimizer, scheduler, epoch, best_nmape, global_step,
+                save_dir / "best.pt",
             )
             print(f"  -> New best NMAPE: {best_nmape:.2f}%")
 
         # Save latest checkpoint every epoch
         save_checkpoint(
-            model, optimizer, scheduler, epoch, best_nmape, save_dir / "latest.pt"
+            model, optimizer, scheduler, epoch, best_nmape, global_step,
+            save_dir / "latest.pt",
         )
 
     print(f"\nTraining complete. Best NMAPE: {best_nmape:.2f}%")
