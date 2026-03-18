@@ -21,6 +21,7 @@ cd $SCRATCH/LeMat-Rho
 
 # Load W&B API key from .env
 export $(grep -v '^#' .env | xargs)
+export PYTHONUNBUFFERED=1
 
 # --- Train ---
 RESUME_FLAG=""
