@@ -10,14 +10,13 @@ import torch
 
 # Import directly so tests work without the charge3net sibling repo installed
 import sys
-from pathlib import Path
 
 # Patch the charge3net path check so we can import train.py without the repo
 sys.modules.setdefault("src", type(sys)("src"))
 
 # We import the metric functions directly by exec'ing only the relevant parts
 # of train.py to avoid triggering the charge3net sys.path block at module level.
-from charge3net_ft.train import compute_nmape, compute_nrmse, compute_rmse
+from charge3net_ft.train import compute_nmape, compute_nrmse, compute_rmse  # noqa: E402
 
 
 class TestComputeNmape:

@@ -18,9 +18,7 @@ dependencies = [
     "pyarrow>=14.0.0",
     "wandb>=0.16.0",
     "python-dotenv>=1.0.0",
-    "charge3net",
 ]
 
 [tool.uv.sources]
 material-hasher = { git = "https://github.com/LeMaterial/lematerial-hasher" }
-charge3net = { git = "https://github.com/AIforGreatGood/charge3net" }

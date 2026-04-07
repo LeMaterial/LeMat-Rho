@@ -8,10 +8,9 @@ without requiring the real charge3net repo or a GPU.
 import pytest
 import torch
 import torch.nn as nn
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import sys
 import tempfile
-from pathlib import Path
 
 
 def _make_mock_e3density():
