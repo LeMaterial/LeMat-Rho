@@ -15,8 +15,15 @@ from torch import nn
 
 # ---------------------------------------------------------------------------
 # charge3net imports
+# Expects: <parent of LeMat-Rho>/charge3net/ (cloned from AIforGreatGood/charge3net)
 # ---------------------------------------------------------------------------
-_CHARGE3NET_ROOT = Path(__file__).resolve().parent.parent / "charge3net"
+_CHARGE3NET_ROOT = Path(__file__).resolve().parent.parent.parent / "charge3net"
+if not _CHARGE3NET_ROOT.exists():
+    raise RuntimeError(
+        f"charge3net repo not found at {_CHARGE3NET_ROOT}.\n"
+        "Clone it with: git clone https://github.com/AIforGreatGood/charge3net "
+        f"{_CHARGE3NET_ROOT}"
+    )
 if str(_CHARGE3NET_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHARGE3NET_ROOT))
 
@@ -73,6 +80,10 @@ class ChargE3NetWrapper(nn.Module):
         1. Legacy PyTorch Lightning: state_dict keys prefixed with "network."
         2. New charge3net format: checkpoint["model"] contains the state_dict.
         3. Raw state_dict: the file IS the state_dict.
+
+        Note: weights_only=False is required for the legacy PL format which
+        stores non-tensor objects. The checkpoint is our own internal file
+        (AIforGreatGood/charge3net repo), not untrusted user input.
         """
         ckpt_path = Path(ckpt_path)
         if not ckpt_path.exists():

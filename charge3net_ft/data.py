@@ -6,8 +6,8 @@ expected input format (padded dict batches), and builds PBC-aware atom-atom
 and atom-probe graphs using charge3net's KdTreeGraphConstructor.
 
 Uses lazy loading: only an index of valid rows is stored in memory (~2 MB).
-Parquet rows are read on-the-fly in __getitem__, keeping RSS under 500 MB
-regardless of dataset size.
+Parquet rows are read on-the-fly in __getitem__. Each DataLoader worker caches
+opened tables per chunk file so each file is read from disk only once per worker.
 """
 
 import json
@@ -26,8 +26,15 @@ from torch.utils.data import DataLoader, Dataset, random_split
 # ---------------------------------------------------------------------------
 # charge3net imports — add the cloned repo to sys.path so that its internal
 # `from src.charge3net.data...` imports resolve correctly.
+# Expects: <parent of LeMat-Rho>/charge3net/ (cloned from AIforGreatGood/charge3net)
 # ---------------------------------------------------------------------------
-_CHARGE3NET_ROOT = Path(__file__).resolve().parent.parent / "charge3net"
+_CHARGE3NET_ROOT = Path(__file__).resolve().parent.parent.parent / "charge3net"
+if not _CHARGE3NET_ROOT.exists():
+    raise RuntimeError(
+        f"charge3net repo not found at {_CHARGE3NET_ROOT}.\n"
+        "Clone it with: git clone https://github.com/AIforGreatGood/charge3net "
+        f"{_CHARGE3NET_ROOT}"
+    )
 if str(_CHARGE3NET_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHARGE3NET_ROOT))
 
@@ -47,6 +54,11 @@ _COLUMNS = [
 # Element symbol -> atomic number lookup
 # ---------------------------------------------------------------------------
 _SYMBOL_TO_Z = {s: z for z, s in enumerate(ase.data.chemical_symbols)}
+
+# Process-local table cache: keyed by file index, populated on first access.
+# Each DataLoader worker process has its own cache, so each chunk file is read
+# from disk at most once per worker instead of once per __getitem__ call.
+_TABLE_CACHE: dict = {}
 
 
 def _parse_grid_json(json_str: str) -> np.ndarray:
@@ -106,13 +118,16 @@ def _build_parquet_index(parquet_dir: Path) -> tuple:
     index = []
     n_total = 0
     for fi, fp in enumerate(file_paths):
-        # Read only the charge density column to check for nulls — fast
-        table = pq.read_table(fp, columns=["compressed_charge_density"])
-        col = table.column("compressed_charge_density")
+        # Read only the charge density column to check for nulls.
+        # Use .is_valid (Arrow scalar) rather than .as_py() is not None to
+        # avoid creating Python objects for every row.
+        col = pq.read_table(fp, columns=["compressed_charge_density"]).column(
+            "compressed_charge_density"
+        )
         n_rows = len(col)
         n_total += n_rows
         for ri in range(n_rows):
-            if col[ri].as_py() is not None:
+            if col[ri].is_valid:
                 index.append((fi, ri))
 
     n_valid = len(index)
@@ -126,8 +141,8 @@ class LeMatRhoDataset(Dataset):
     charge3net-compatible graph dicts.
 
     Only a lightweight index (~2 MB for 65k rows) is stored in memory.
-    Each __getitem__ call reads a single row from disk, converts it to
-    ase.Atoms + density grid, and builds the graph.
+    Each __getitem__ call retrieves a single row. Chunk files are cached
+    per-worker so each file is loaded from disk only once per worker process.
 
     Parameters
     ----------
@@ -168,9 +183,16 @@ class LeMatRhoDataset(Dataset):
         return len(self._index)
 
     def _read_row(self, idx: int) -> dict:
-        """Read a single row from disk via its index entry."""
+        """
+        Read a single row from disk via its index entry.
+
+        Uses a process-local cache (_TABLE_CACHE) so each chunk file is
+        loaded from disk only once per worker, not on every __getitem__ call.
+        """
         fi, ri = self._index[idx]
-        table = pq.read_table(self._file_paths[fi], columns=_COLUMNS)
+        if fi not in _TABLE_CACHE:
+            _TABLE_CACHE[fi] = pq.read_table(self._file_paths[fi], columns=_COLUMNS)
+        table = _TABLE_CACHE[fi]
         row = {}
         for col in _COLUMNS:
             row[col] = table.column(col)[ri].as_py()
@@ -204,15 +226,20 @@ def build_dataloaders(
     val_probes: int = 1000,
     batch_size: int = 4,
     val_frac: float = 0.05,
+    test_frac: float = 0.05,
     num_workers: int = 4,
     seed: int = 42,
     pin_memory: bool = False,
 ) -> tuple:
     """
-    Build train and validation DataLoaders.
+    Build train, validation, and test DataLoaders.
 
-    Scans Parquet files once, then creates two datasets (with different
+    Scans Parquet files once, then creates three datasets (with different
     probe sampling) that share the same lightweight index.
+
+    The split is deterministic given (seed, val_frac, test_frac). These
+    values must not change between runs if reported metrics are to remain
+    comparable.
 
     Parameters
     ----------
@@ -223,11 +250,14 @@ def build_dataloaders(
     train_probes : int
         Number of randomly sampled probes per sample during training.
     val_probes : int
-        Number of probes per sample during validation. Use None for all.
+        Number of probes per sample during validation and test.
     batch_size : int
         Batch size.
     val_frac : float
         Fraction of data to use for validation.
+    test_frac : float
+        Fraction of data to hold out as a test set (never used for model
+        selection — only evaluated once at the end of training).
     num_workers : int
         DataLoader workers.
     seed : int
@@ -237,9 +267,9 @@ def build_dataloaders(
 
     Returns
     -------
-    train_loader, val_loader : DataLoader, DataLoader
+    train_loader, val_loader, test_loader : DataLoader, DataLoader, DataLoader
     """
-    # Build the index once, share between train and val datasets
+    # Build the index once, share between all three datasets
     shared_index = _build_parquet_index(Path(parquet_dir))
 
     train_dataset = LeMatRhoDataset(
@@ -248,16 +278,23 @@ def build_dataloaders(
     val_dataset = LeMatRhoDataset(
         cutoff=cutoff, num_probes=val_probes, _shared_index=shared_index
     )
+    test_dataset = LeMatRhoDataset(
+        cutoff=cutoff, num_probes=val_probes, _shared_index=shared_index
+    )
 
-    # Split indices (same for both datasets, different probe sampling)
+    # Split indices (same for all three datasets, different probe sampling)
     n = len(train_dataset)
     n_val = int(n * val_frac)
-    n_train = n - n_val
+    n_test = int(n * test_frac)
+    n_train = n - n_val - n_test
     generator = torch.Generator().manual_seed(seed)
-    train_indices, val_indices = random_split(range(n), [n_train, n_val], generator=generator)
+    train_indices, val_indices, test_indices = random_split(
+        range(n), [n_train, n_val, n_test], generator=generator
+    )
 
     train_subset = torch.utils.data.Subset(train_dataset, train_indices.indices)
     val_subset = torch.utils.data.Subset(val_dataset, val_indices.indices)
+    test_subset = torch.utils.data.Subset(test_dataset, test_indices.indices)
 
     collate_fn = partial(collate_list_of_dicts, pin_memory=pin_memory)
 
@@ -277,5 +314,13 @@ def build_dataloaders(
         collate_fn=collate_fn,
         pin_memory=pin_memory,
     )
+    test_loader = DataLoader(
+        test_subset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=pin_memory,
+    )
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader

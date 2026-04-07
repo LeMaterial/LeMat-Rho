@@ -19,8 +19,8 @@ conda activate uma12
 
 cd $SCRATCH/LeMat-Rho
 
-# Load W&B API key from .env
-export $(grep -v '^#' .env | xargs)
+# Load W&B API key and other secrets from .env
+set -a; source .env; set +a
 export PYTHONUNBUFFERED=1
 
 # --- Train ---
@@ -30,7 +30,7 @@ if [ -f "$SCRATCH/charge3net_checkpoints/latest.pt" ]; then
     echo "Resuming from $SCRATCH/charge3net_checkpoints/latest.pt"
 fi
 
-python train.py \
+python -m charge3net_ft.train \
     --parquet-dir $SCRATCH/charge3net_data/lematrho_full_10x10x10 \
     --ckpt-path $SCRATCH/charge3net/models/charge3net_mp.pt \
     --save-dir $SCRATCH/charge3net_checkpoints \
