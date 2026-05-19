@@ -27,9 +27,13 @@ def _import_data_utils():
 
     # Stub out the charge3net modules so the import succeeds without the repo
     fake_modules = [
-        "src", "src.charge3net", "src.charge3net.data",
-        "src.charge3net.data.collate", "src.charge3net.data.graph_construction",
-        "src.utils", "src.utils.data",
+        "src",
+        "src.charge3net",
+        "src.charge3net.data",
+        "src.charge3net.data.collate",
+        "src.charge3net.data.graph_construction",
+        "src.utils",
+        "src.utils.data",
     ]
     stubs = {}
     for mod in fake_modules:
@@ -42,6 +46,7 @@ def _import_data_utils():
         # Also patch the existence check so it doesn't raise
         with patch("pathlib.Path.exists", return_value=True):
             import importlib
+
             # Force reimport with stubs in place
             if "charge3net_ft.data" in sys.modules:
                 del sys.modules["charge3net_ft.data"]
@@ -54,6 +59,7 @@ class TestParseGridJson:
         grid = [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]]
         json_str = json.dumps(grid)
         from charge3net_ft.data import _parse_grid_json
+
         result = _parse_grid_json(json_str)
         assert result.shape == (2, 2, 2)
         assert result.dtype == np.float32
@@ -61,6 +67,7 @@ class TestParseGridJson:
 
     def test_10x10x10(self):
         from charge3net_ft.data import _parse_grid_json
+
         grid = np.random.rand(10, 10, 10).tolist()
         result = _parse_grid_json(json.dumps(grid))
         assert result.shape == (10, 10, 10)
@@ -78,6 +85,7 @@ class TestRowToAtomsAndDensity:
     def test_atoms_species(self):
         import ase
         from charge3net_ft.data import _row_to_atoms_and_density
+
         row = self._make_row()
         atoms, density, origin = _row_to_atoms_and_density(row)
         assert isinstance(atoms, ase.Atoms)
@@ -85,21 +93,25 @@ class TestRowToAtomsAndDensity:
 
     def test_pbc(self):
         from charge3net_ft.data import _row_to_atoms_and_density
+
         atoms, _, _ = _row_to_atoms_and_density(self._make_row())
         assert all(atoms.pbc)
 
     def test_density_shape(self):
         from charge3net_ft.data import _row_to_atoms_and_density
+
         _, density, _ = _row_to_atoms_and_density(self._make_row())
         assert density.shape == (10, 10, 10)
 
     def test_origin_is_zero(self):
         from charge3net_ft.data import _row_to_atoms_and_density
+
         _, _, origin = _row_to_atoms_and_density(self._make_row())
         np.testing.assert_array_equal(origin, [0.0, 0.0, 0.0])
 
     def test_unknown_species_raises(self):
         from charge3net_ft.data import _row_to_atoms_and_density
+
         row = self._make_row()
         row["species_at_sites"] = ["Xx"]  # invalid symbol
         with pytest.raises(KeyError):
@@ -111,16 +123,24 @@ class TestBuildParquetIndex:
         """Write a synthetic chunk_*.parquet file."""
         valid = [json.dumps(np.ones((10, 10, 10)).tolist())] * n_valid
         null = [None] * n_null
-        table = pa.table({
-            "compressed_charge_density": pa.array(valid + null, type=pa.string()),
-            "species_at_sites": pa.array([["Fe"]] * (n_valid + n_null)),
-            "cartesian_site_positions": pa.array([[[0.0, 0.0, 0.0]]] * (n_valid + n_null)),
-            "lattice_vectors": pa.array([[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]] * (n_valid + n_null)),
-        })
+        table = pa.table(
+            {
+                "compressed_charge_density": pa.array(valid + null, type=pa.string()),
+                "species_at_sites": pa.array([["Fe"]] * (n_valid + n_null)),
+                "cartesian_site_positions": pa.array(
+                    [[[0.0, 0.0, 0.0]]] * (n_valid + n_null)
+                ),
+                "lattice_vectors": pa.array(
+                    [[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]]
+                    * (n_valid + n_null)
+                ),
+            }
+        )
         pq.write_table(table, path)
 
     def test_counts_valid_rows(self):
         from charge3net_ft.data import _build_parquet_index
+
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             self._write_chunk(d / "chunk_000.parquet", n_valid=5, n_null=2)
@@ -131,6 +151,7 @@ class TestBuildParquetIndex:
 
     def test_index_entries_reference_correct_file(self):
         from charge3net_ft.data import _build_parquet_index
+
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             self._write_chunk(d / "chunk_000.parquet", n_valid=3, n_null=0)
@@ -142,6 +163,59 @@ class TestBuildParquetIndex:
 
     def test_raises_on_empty_dir(self):
         from charge3net_ft.data import _build_parquet_index
+
         with tempfile.TemporaryDirectory() as tmp:
             with pytest.raises(FileNotFoundError):
                 _build_parquet_index(Path(tmp))
+
+    def test_ignores_extra_columns(self):
+        """Newer LeMat-Rho dataset versions add Bader-analysis columns (e.g.
+        bader_charges, bader_volumes) alongside the four required columns.
+        _build_parquet_index and _row_to_atoms_and_density should ignore the
+        extras transparently: data.py:46 declares an explicit _COLUMNS allowlist
+        and pq.read_table is called with columns=_COLUMNS.
+        """
+        from charge3net_ft.data import _build_parquet_index, _row_to_atoms_and_density
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            n = 3
+            grid = json.dumps(np.ones((10, 10, 10)).tolist())
+            table = pa.table(
+                {
+                    # required columns
+                    "compressed_charge_density": pa.array([grid] * n, type=pa.string()),
+                    "species_at_sites": pa.array([["Fe"]] * n),
+                    "cartesian_site_positions": pa.array([[[0.0, 0.0, 0.0]]] * n),
+                    "lattice_vectors": pa.array(
+                        [[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]] * n
+                    ),
+                    # extras analogous to what Entalpic/lemat-rho-v1 added in 2026:
+                    "bader_charges": pa.array([[0.42]] * n),
+                    "bader_volumes": pa.array([[11.7]] * n),
+                    "material_id": pa.array([f"mat_{i}" for i in range(n)]),
+                }
+            )
+            pq.write_table(table, d / "chunk_000.parquet")
+
+            # build_parquet_index should still find all 3 valid rows
+            file_paths, index = _build_parquet_index(d)
+            assert len(index) == n
+            assert len(file_paths) == 1
+
+            # _row_to_atoms_and_density should produce a usable atoms+density
+            # even when the row dict contains the extras (it indexes the
+            # required keys directly, so the extras are dead weight).
+            row = {
+                "species_at_sites": ["Fe"],
+                "cartesian_site_positions": [[0.0, 0.0, 0.0]],
+                "lattice_vectors": [[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]],
+                "compressed_charge_density": grid,
+                "bader_charges": [0.42],
+                "bader_volumes": [11.7],
+                "material_id": "mat_0",
+            }
+            atoms, density, origin = _row_to_atoms_and_density(row)
+            assert len(atoms) == 1
+            assert density.shape == (10, 10, 10)
+            np.testing.assert_array_equal(origin, np.zeros(3))
