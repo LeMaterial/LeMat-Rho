@@ -414,9 +414,13 @@ def main():
         ),
         num_workers=0,
     )
-    if is_main:
-        logging.info("Preloading validation batch")
-    val_loader = [b for b in val_loader]
+    # Upstream materialised the full val_loader into a list at startup for
+    # speed ("Preloading validation batch"). Their NMC/QM9/ethyleneCarbonate
+    # val sets are ~100 materials so that's cheap. Ours is ~3.3 k materials
+    # x 5 000 probes/material -> ~150 GB if eagerly preloaded, which OOM-killed
+    # job 4971720. Leave val_loader as a streaming DataLoader instead; the
+    # data-loading overhead per val pass is negligible compared to DDP
+    # gradient sync (when DDP is enabled). Hyperparameters are unchanged.
 
     # Initialise model
     device = torch.device(args.device)
