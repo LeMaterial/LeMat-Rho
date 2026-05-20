@@ -29,7 +29,11 @@
 #SBATCH --constraint=MI250
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=125000M
+# No --mem here on purpose: SLURM allocates memory proportional to our CPU
+# share (64 of 128 logical CPUs = ~128 GB out of the 256 GB node). The
+# earlier --mem=125000M was being read as "asking for half the node memory"
+# and contributed to SLURM auto-bumping us to EXCLUSIVE mode. Letting SLURM
+# pick lets the other half of the node stay schedulable for other jobs.
 #SBATCH --time=06:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
