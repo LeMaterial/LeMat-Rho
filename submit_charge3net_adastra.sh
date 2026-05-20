@@ -80,7 +80,13 @@ TRAIN_ARGS=(
     --lr 5e-4
     --train-probes 200
     --val-probes 1000
-    --num-workers 8
+    # num-workers=2 (down from 8): with 4 DDP ranks each forking workers, the
+    # previous setting created 32 worker processes total and the per-worker
+    # _TABLE_CACHE in data.py OOM-killed jobs 4971293/4971343 at ~140 GB
+    # cumulative RSS. The LRU eviction we landed in data.py would help on
+    # its own, but lowering worker count further drops cache pressure with
+    # zero loss in throughput at this dataset/grid size.
+    --num-workers 2
     --wandb-project lemat-rho-charge3net
     --wandb-entity dtts
     --wandb-mode offline

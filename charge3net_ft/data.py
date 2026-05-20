@@ -10,6 +10,7 @@ Parquet rows are read on-the-fly in __getitem__. Each DataLoader worker caches
 opened tables per chunk file so each file is read from disk only once per worker.
 """
 
+import collections
 import json
 import sys
 from functools import partial
@@ -55,10 +56,20 @@ _COLUMNS = [
 # ---------------------------------------------------------------------------
 _SYMBOL_TO_Z = {s: z for z, s in enumerate(ase.data.chemical_symbols)}
 
-# Process-local table cache: keyed by file index, populated on first access.
-# Each DataLoader worker process has its own cache, so each chunk file is read
-# from disk at most once per worker instead of once per __getitem__ call.
-_TABLE_CACHE: dict = {}
+# Process-local LRU table cache: keyed by file index, populated on first access.
+# Each DataLoader worker has its own cache (workers fork the parent), so each
+# chunk file is read from disk at most once per worker per cache cycle.
+#
+# Bounded LRU because the previous unbounded version OOM-killed jobs 4971293
+# and 4971343 at MaxRSS=35 GB/rank. Per-chunk decompressed pyarrow tables
+# weigh ~2 GB (the compressed_charge_density JSON strings inflate 6x from
+# disk). With 8 workers x 4 DDP ranks = 32 workers, an unbounded cache grew
+# to ~140 GB total in 6 h.
+#
+# Cap of 5 chunks per worker keeps each worker's cache around 10 GB worst
+# case, well under any per-rank memory budget. OrderedDict gives O(1) LRU.
+_TABLE_CACHE_MAX_CHUNKS = 5
+_TABLE_CACHE: "collections.OrderedDict[int, object]" = collections.OrderedDict()
 
 
 def _parse_grid_json(json_str: str) -> np.ndarray:
@@ -188,11 +199,21 @@ class LeMatRhoDataset(Dataset):
         """
         Read a single row from disk via its index entry.
 
-        Uses a process-local cache (_TABLE_CACHE) so each chunk file is
-        loaded from disk only once per worker, not on every __getitem__ call.
+        Uses a process-local LRU cache (_TABLE_CACHE) so each chunk file is
+        loaded from disk at most once per worker per cache cycle. Cache is
+        capped at _TABLE_CACHE_MAX_CHUNKS entries; on a miss past capacity
+        the least-recently-used chunk is evicted. Re-access of a present
+        entry promotes it to most-recent so the running shuffled-access
+        pattern from RandomSampler doesn't constantly thrash.
         """
         fi, ri = self._index[idx]
-        if fi not in _TABLE_CACHE:
+        if fi in _TABLE_CACHE:
+            # Hit: bump to most-recent and return.
+            _TABLE_CACHE.move_to_end(fi)
+        else:
+            # Miss: evict LRU if at capacity, then read.
+            if len(_TABLE_CACHE) >= _TABLE_CACHE_MAX_CHUNKS:
+                _TABLE_CACHE.popitem(last=False)
             _TABLE_CACHE[fi] = pq.read_table(self._file_paths[fi], columns=_COLUMNS)
         table = _TABLE_CACHE[fi]
         row = {}

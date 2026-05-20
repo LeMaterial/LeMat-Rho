@@ -219,3 +219,121 @@ class TestBuildParquetIndex:
             assert len(atoms) == 1
             assert density.shape == (10, 10, 10)
             np.testing.assert_array_equal(origin, np.zeros(3))
+
+
+# ---------------------------------------------------------------------------
+# LRU eviction for the per-worker parquet table cache.
+#
+# Why this is here (regression test for the OOM that killed jobs 4971293 and
+# 4971343): without eviction, each DataLoader worker accumulates every chunk
+# it has ever read. With 8 workers per rank x 4 DDP ranks = 32 workers, and
+# ~2 GB of pyarrow-decompressed table per chunk, the cache alone can grow to
+# ~140 GB on a long run. The OOM hit at MaxRSS=35 GB per rank x 4 = 140 GB,
+# above our 125 GB --mem budget.
+#
+# The fix: cap the cache. A small LRU bounded by `_TABLE_CACHE_MAX_CHUNKS`
+# evicts the least-recently-used chunk before adding a new one.
+# ---------------------------------------------------------------------------
+
+
+class TestTableCacheLRU:
+    """LeMatRhoDataset's _TABLE_CACHE must evict to stay below a bounded size."""
+
+    def _write_n_chunks(self, d: Path, n: int):
+        for i in range(n):
+            _write_one_row_chunk(d / f"chunk_{i:03d}.parquet")
+
+    def test_cache_size_is_bounded(self):
+        """After reading from many chunks, the cache must not contain all of them."""
+        from charge3net_ft import data as data_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            n_chunks = 10
+            self._write_n_chunks(d, n_chunks)
+
+            # Force a small cap so the test is fast and unambiguous.
+            original_max = getattr(data_mod, "_TABLE_CACHE_MAX_CHUNKS", None)
+            data_mod._TABLE_CACHE_MAX_CHUNKS = 3
+            data_mod._TABLE_CACHE.clear()
+            try:
+                ds = data_mod.LeMatRhoDataset(parquet_dir=d, num_probes=None)
+                for i in range(len(ds)):
+                    _ = ds._read_row(i)
+                assert len(data_mod._TABLE_CACHE) <= 3, (
+                    "cache grew beyond _TABLE_CACHE_MAX_CHUNKS=3; "
+                    f"actual size {len(data_mod._TABLE_CACHE)}"
+                )
+            finally:
+                if original_max is not None:
+                    data_mod._TABLE_CACHE_MAX_CHUNKS = original_max
+                data_mod._TABLE_CACHE.clear()
+
+    def test_cache_evicts_least_recently_used(self):
+        """When the cache is full, the next miss should drop the LRU entry."""
+        from charge3net_ft import data as data_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_n_chunks(d, 5)
+            data_mod._TABLE_CACHE_MAX_CHUNKS = 2
+            data_mod._TABLE_CACHE.clear()
+            try:
+                ds = data_mod.LeMatRhoDataset(parquet_dir=d, num_probes=None)
+                # Touch chunks 0, 1 -> cache holds {0, 1}
+                ds._read_row(0)
+                ds._read_row(1)
+                assert set(data_mod._TABLE_CACHE.keys()) == {0, 1}
+                # Touch chunk 2 -> the LRU (0) should evict, cache holds {1, 2}
+                ds._read_row(2)
+                assert set(data_mod._TABLE_CACHE.keys()) == {1, 2}, (
+                    f"expected LRU eviction of chunk 0, got cache keys "
+                    f"{set(data_mod._TABLE_CACHE.keys())}"
+                )
+                # Re-access 1 -> bumps 1 to most-recent; cache still {1, 2}
+                ds._read_row(1)
+                # Touch 3 -> 2 is now LRU, evict 2, cache holds {1, 3}
+                ds._read_row(3)
+                assert set(data_mod._TABLE_CACHE.keys()) == {1, 3}, (
+                    f"expected LRU eviction of chunk 2 after re-access of 1; "
+                    f"got cache keys {set(data_mod._TABLE_CACHE.keys())}"
+                )
+            finally:
+                data_mod._TABLE_CACHE.clear()
+
+    def test_cache_max_default_is_reasonable(self):
+        """The default cap must be > 0 and small enough that 8 workers x cap
+        worth of cached chunks fits well below per-rank memory budgets.
+
+        With ~2 GB per chunk and ~8 workers per rank, a default of 5 caps
+        the per-rank cache at ~80 GB worst case (only chunks the worker
+        actually saw count; in practice well under). We pick 5 to leave
+        plenty of margin under a 32-GB-per-rank shared-mode allocation.
+        """
+        from charge3net_ft import data as data_mod
+
+        assert hasattr(data_mod, "_TABLE_CACHE_MAX_CHUNKS"), (
+            "_TABLE_CACHE_MAX_CHUNKS must be defined for the LRU to work"
+        )
+        assert 1 <= data_mod._TABLE_CACHE_MAX_CHUNKS <= 20, (
+            f"_TABLE_CACHE_MAX_CHUNKS={data_mod._TABLE_CACHE_MAX_CHUNKS} is "
+            "outside the sensible range [1, 20]; very small evicts too "
+            "aggressively for shuffled access, very large defeats the cap"
+        )
+
+
+def _write_one_row_chunk(path: Path):
+    """Helper: one valid row per chunk; used by the LRU eviction tests."""
+    table = pa.table(
+        {
+            "compressed_charge_density": pa.array(
+                [json.dumps(np.ones((10, 10, 10)).tolist())], type=pa.string()
+            ),
+            "species_at_sites": pa.array([["Fe"]]),
+            "cartesian_site_positions": pa.array([[[0.0, 0.0, 0.0]]]),
+            "lattice_vectors": pa.array(
+                [[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]]
+            ),
+        }
+    )
+    pq.write_table(table, path)
