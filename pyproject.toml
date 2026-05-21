@@ -18,6 +18,8 @@ dependencies = [
     "pyarrow>=14.0.0",
     "wandb>=0.16.0",
     "python-dotenv>=1.0.0",
+    "metatensor>=0.2.0",
+    "chemfiles>=0.10.4",
 ]
 
 [tool.uv.sources]
