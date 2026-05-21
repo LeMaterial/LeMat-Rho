@@ -250,17 +250,18 @@ def project_chgcar_to_basis(
     coeffs = np.zeros((n_atoms, basis_spec.n_coeffs_per_atom), dtype=np.float64)
     positions = atoms.get_positions()
 
-    for i, pos in enumerate(positions):
-        B = _eval_basis_at_grid(pos, grid_pos, cell, basis_spec)  # (n_grid, n_coeffs)
-        # Orthonormal-approx coefficient: c_k = <B_k, rho> / <B_k, B_k>
-        # Both inner products use the same uniform grid weight so the weights
-        # cancel; no need to multiply by dV.
-        numer = B.T @ rho_flat  # (n_coeffs,)
-        denom = np.sum(B * B, axis=0)  # (n_coeffs,)
-        denom_safe = np.where(denom > 0, denom, 1.0)
-        coeffs[i] = numer / denom_safe
-        # Channels with denom == 0 (basis function vanishes on the grid)
-        # are left as 0 since the numerator is also 0 by construction.
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        for i, pos in enumerate(positions):
+            B = _eval_basis_at_grid(pos, grid_pos, cell, basis_spec)
+            # Orthonormal-approx coefficient: c_k = <B_k, rho> / <B_k, B_k>.
+            # Both inner products use the same uniform grid weight so the
+            # weights cancel; no need to multiply by dV.
+            numer = B.T @ rho_flat
+            denom = np.sum(B * B, axis=0)
+            denom_safe = np.where(denom > 0, denom, 1.0)
+            coeffs[i] = numer / denom_safe
+            # Channels with denom == 0 (basis function vanishes on the grid)
+            # are left at 0 since the numerator is also 0 by construction.
 
     return coeffs
 
@@ -302,8 +303,11 @@ def reconstruct_grid_from_basis(
 
     rho_flat = np.zeros(grid_pos.shape[0], dtype=np.float64)
     coefficients = coefficients.astype(np.float64)
-    for i, pos in enumerate(positions):
-        B = _eval_basis_at_grid(pos, grid_pos, cell, basis_spec)
-        rho_flat += B @ coefficients[i]
+    # Same harmless matmul warnings from masked-out grid points as in
+    # _eval_basis_at_grid; silence them at the caller too.
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        for i, pos in enumerate(positions):
+            B = _eval_basis_at_grid(pos, grid_pos, cell, basis_spec)
+            rho_flat += B @ coefficients[i]
 
     return rho_flat.reshape(grid_shape)
