@@ -250,18 +250,28 @@ def project_chgcar_to_basis(
     coeffs = np.zeros((n_atoms, basis_spec.n_coeffs_per_atom), dtype=np.float64)
     positions = atoms.get_positions()
 
+    # Build the full per-structure design matrix B_global of shape
+    # (n_grid, n_atoms * n_coeffs_per_atom) and solve a single least-
+    # squares system for ALL atoms' coefficients simultaneously. This
+    # is the correct way to handle the strong overlap between our
+    # Gaussian basis functions (sigma ~ cutoff means heavy overlap).
+    #
+    # The previous orthonormal-approx (numer/denom per channel)
+    # produced ~1000% NMAPE on real LeMat-Rho rows because it
+    # overcounted contributions from overlapping basis functions
+    # (recorded in D1 sanity check, 2026-05-21).
+    n_per_atom = basis_spec.n_coeffs_per_atom
+    B_global = np.empty((grid_pos.shape[0], n_atoms * n_per_atom), dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         for i, pos in enumerate(positions):
-            B = _eval_basis_at_grid(pos, grid_pos, cell, basis_spec)
-            # Orthonormal-approx coefficient: c_k = <B_k, rho> / <B_k, B_k>.
-            # Both inner products use the same uniform grid weight so the
-            # weights cancel; no need to multiply by dV.
-            numer = B.T @ rho_flat
-            denom = np.sum(B * B, axis=0)
-            denom_safe = np.where(denom > 0, denom, 1.0)
-            coeffs[i] = numer / denom_safe
-            # Channels with denom == 0 (basis function vanishes on the grid)
-            # are left at 0 since the numerator is also 0 by construction.
+            B_global[:, i * n_per_atom : (i + 1) * n_per_atom] = _eval_basis_at_grid(
+                pos, grid_pos, cell, basis_spec
+            )
+        # lstsq is overdetermined (n_grid > n_atoms * n_per_atom for our
+        # 10x10x10 grids), so the solution is the unique minimum-residual
+        # least-squares fit.
+        c_flat, *_ = np.linalg.lstsq(B_global, rho_flat, rcond=None)
+    coeffs = c_flat.reshape(n_atoms, n_per_atom)
 
     return coeffs
 
