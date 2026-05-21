@@ -130,6 +130,24 @@ if [ -f "$WORK_DIR/.env" ]; then
     set +a
 fi
 
+# --- NCCL / DDP reliability tweaks ---
+# Job 4977567 (2026-05-21) ran 2h41m, then died from NCCL TCPStore
+# "Broken pipe / should dump flag" on the DDP heartbeat. Memory was
+# fine (14 GB/task with the LRU cache fix). The crash is on the
+# inter-rank communication channel, not the model. These three env
+# vars expand the timeout budget so a transient slow rank doesn't
+# tear down the whole job.
+#   NCCL_TIMEOUT                       per-collective timeout (seconds)
+#   NCCL_ASYNC_ERROR_HANDLING=1        clean shutdown on rank failure
+#                                      (no cascading hangs)
+#   TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC   how long a rank can stall
+#                                      before HeartbeatMonitor tears
+#                                      down the process group
+export NCCL_TIMEOUT=3600
+export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800
+export TORCH_NCCL_TRACE_BUFFER_SIZE=1000  # capture more debug info on next crash
+
 # --- Distributed-training env vars (read by train.py's _setup_ddp) ---
 # SLURM sets SLURM_NTASKS, SLURM_PROCID, SLURM_LOCALID for us via srun.
 # torch.distributed wants WORLD_SIZE / RANK / LOCAL_RANK plus MASTER_ADDR
