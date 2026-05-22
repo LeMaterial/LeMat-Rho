@@ -17,10 +17,18 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --account=c1816212
 #SBATCH --constraint=GENOA
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=4
 #SBATCH --time=02:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
+# Resource sizing notes (2026-05-22):
+# - --partition=genoa-shared rejected by CINES policy ("You are not allowed
+#   to ask for a partition"), same as --qos=debug. We use --constraint=GENOA
+#   and let SLURM auto-route based on resource size.
+# - Bumped --cpus-per-task from 16 to 4 so SLURM keeps us in genoa-shared
+#   (it auto-routes to the shared partition for small CPU asks, exclusive
+#   for larger ones). 4 CPUs is enough for our numpy-LSQR + BLAS thread
+#   pool; the projection is ~1 min/chunk, single chunk is the bottleneck.
 
 set -eo pipefail
 
