@@ -15,5 +15,16 @@ land in the same comparison table.
 """
 
 from graph2mat_ft.basis import basis_table_for_species, point_basis_for_species
+from graph2mat_ft.projection import (
+    make_basis_configuration,
+    pack_coeffs_to_point_labels,
+    unpack_point_labels_to_coeffs,
+)
 
-__all__ = ["basis_table_for_species", "point_basis_for_species"]
+__all__ = [
+    "basis_table_for_species",
+    "make_basis_configuration",
+    "pack_coeffs_to_point_labels",
+    "point_basis_for_species",
+    "unpack_point_labels_to_coeffs",
+]
