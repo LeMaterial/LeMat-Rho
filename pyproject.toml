@@ -20,6 +20,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "metatensor>=0.2.0",
     "chemfiles>=0.10.4",
+    "graph2mat>=0.0.13",
 ]
 
 [tool.uv.sources]
