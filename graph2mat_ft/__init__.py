@@ -1,17 +1,24 @@
-"""Graph2Mat-arm infrastructure for the r2SCAN benchmark.
+"""Graph2Mat-arm infrastructure for the r2SCAN benchmark (PARKED).
 
-Parallel to ``salted_ft`` but targeting Graph2Mat
-(``BIG-MAP/graph2mat``). Stacked PR layout (mirror of SALTED):
+PARKED 2026-05-25. Reasoning (see
+``../plan_graph2mat_parked_2026-05-25.md``):
 
-* ``basis.py`` (PR zeta-alpha) -- ``BasisSpec`` -> ``PointBasis``
-* ``projection.py`` (PR zeta-beta) -- density grid <-> density matrix
-* ``model.py`` (PR zeta-gamma) -- ``Graph2MatModel`` wrapper
-* ``io.py`` (PR zeta-delta) -- shared CHGCAR I/O (probably reuses
-   ``salted_ft.io``)
+Graph2Mat's native target is a per-pair atom-centered density
+matrix ``D_ab``. VASP outputs only a grid density (not D_ab in any
+localized basis), so training Graph2Mat on VASP r2SCAN would
+require inventing a CHGCAR -> D_ab projection. Standard LSQR on
+that is a 10^6 x 10^6 dense linear system per structure; the
+matrix-free + neighbor-cutoff variant is multi-week research-grade
+engineering with its own quality ceiling to validate.
 
-The basis we project onto, the comparison metric (NMAPE/RMSE/NRMSE)
-and the CHGCAR I/O are shared with the SALTED arm so the two models
-land in the same comparison table.
+For the LeMat-Rho 3-arm comparison (ChargE3Net, DeepDFT, SALTED),
+Graph2Mat is parked. The code below is correct as scaffolding and
+ships with green tests; it can be revived if (1) we switch the
+training set to a code that natively outputs D_ab (SIESTA, ...) or
+(2) someone invests in the matrix-free projection.
+
+The basis adapter (PointBasis) and IO re-export are still useful
+in their own right; left in place.
 """
 
 from graph2mat_ft.basis import basis_table_for_species, point_basis_for_species
