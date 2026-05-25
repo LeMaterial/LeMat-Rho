@@ -21,6 +21,7 @@ delegates to rholearn. The rholearn sibling repo is expected at
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -122,14 +123,16 @@ class SALTEDModel:
         positions = atoms.get_positions()
         numbers = atoms.get_atomic_numbers()
 
-        # Build a deterministic seed from the inputs. NumPy's
-        # SeedSequence handles arbitrary-length input cleanly.
-        seed_bytes = (
+        # Hash every byte: int.from_bytes(...[:16]) would discard atoms
+        # past index 0 and silently collapse different structures into
+        # the same seed.
+        digest = hashlib.blake2b(
             positions.astype(np.float64).tobytes()
             + numbers.astype(np.int64).tobytes()
-            + str(self.basis_spec).encode("utf-8")
-        )
-        seed_int = int.from_bytes(seed_bytes[:16], byteorder="little", signed=False)
+            + str(self.basis_spec).encode("utf-8"),
+            digest_size=16,
+        ).digest()
+        seed_int = int.from_bytes(digest, byteorder="little", signed=False)
         rng = np.random.default_rng(seed_int)
         return rng.standard_normal((n_atoms, n_coeffs), dtype=np.float64) * 1e-3
 

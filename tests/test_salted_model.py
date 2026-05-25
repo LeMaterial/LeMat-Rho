@@ -126,6 +126,29 @@ class TestSALTEDModelDeterminism:
             "appears to return position-independent constants"
         )
 
+    def test_perturbing_non_first_atom_changes_coefficients(self):
+        """Regression test for the int.from_bytes(seed_bytes[:16], ...)
+        bug: with the old seeding, only atom 0's xyz (the first 24
+        bytes) contributed to the seed, so perturbing atom 1+ produced
+        identical coefficients. The blake2b hash fixes this.
+        """
+        from salted_ft.basis import BasisSpec
+        from salted_ft.model import SALTEDModel
+
+        m = SALTEDModel(basis_spec=BasisSpec())
+        atoms_a = _cubic_atoms(
+            symbols=("Fe", "Fe"), fractional=((0.0, 0.0, 0.0), (0.5, 0.5, 0.5))
+        )
+        atoms_b = _cubic_atoms(
+            symbols=("Fe", "Fe"), fractional=((0.0, 0.0, 0.0), (0.6, 0.5, 0.5))
+        )
+        c_a = m(atoms_a)
+        c_b = m(atoms_b)
+        assert not np.array_equal(c_a, c_b), (
+            "perturbing atom 1 must change the coefficient output; "
+            "if not, the stub seed only uses atom 0's bytes"
+        )
+
 
 class TestSALTEDModelReconstructDensity:
     def test_reconstruct_density_shape(self):
