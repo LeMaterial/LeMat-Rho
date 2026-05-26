@@ -87,9 +87,12 @@ def predict_density(
             max_probe_batch=max_probe_batch,
         )
     if model_name == "deepdft":
-        raise NotImplementedError(
-            "deepdft grid prediction lands in D7-beta2 (separate PR "
-            "because the forward signature differs from charge3net)."
+        return _deepdft_predict_grid(
+            model=model,
+            ckpt=ckpt,
+            atoms=atoms,
+            grid_shape=grid_shape,
+            max_probe_batch=max_probe_batch,
         )
     raise ValueError(f"unknown model arm: {model_name!r}")
 
@@ -140,6 +143,87 @@ def _charge3net_predict_grid(
     grid_pos = calculate_grid_pos(dummy_density, origin, atoms.get_cell())
 
     constructor = KdTreeGraphConstructor(cutoff=4.0, num_probes=None, disable_pbc=False)
+    graph_dict = constructor(dummy_density, atoms, grid_pos)
+    batched = collate_list_of_dicts([graph_dict], pin_memory=False)
+
+    if hasattr(model, "train"):
+        model.train(False)
+
+    preds: list[torch.Tensor] = []
+    with torch.no_grad():
+        for sub_batch in split_batch(batched, max_probe_batch):
+            out = model(sub_batch)
+            preds.append(out.detach().cpu().squeeze(0))
+
+    rho_flat = torch.cat(preds, dim=0).numpy()
+    return rho_flat.reshape(tuple(grid_shape_arr))
+
+
+def _deepdft_predict_grid(
+    model: object | None,
+    ckpt: str | Path | None,
+    atoms: ase.Atoms,
+    grid_shape: tuple[int, int, int],
+    max_probe_batch: int,
+    num_interactions: int = 3,
+    node_size: int = 128,
+    cutoff: float = 4.0,
+    use_painn: bool = True,
+) -> np.ndarray:
+    """DeepDFT grid prediction via probe-batched forward.
+
+    DeepDFT is the upstream code that ChargE3Net forked, so the
+    forward input dict shape is identical: same probe_xyz /
+    probe_edges / num_probes / etc. We reuse charge3net's data
+    utilities (already imported by ``_charge3net_predict_grid``)
+    to build the graph. The arm-specific bits are:
+
+    * sys.path side effect from ``deepdft_ft.runner`` (adds
+      ``../DeepDFT`` and stubs ``asap3`` if it is missing).
+    * model construction via ``densitymodel.PainnDensityModel`` or
+      ``densitymodel.DensityModel`` (SchNet variant).
+    * defaults match ``submit_deepdft_adastra.sh``:
+      num_interactions=3, node_size=128, cutoff=4.0, PaiNN.
+
+    Loading paths
+    -------------
+    * ``model`` provided: use it directly (tests inject mocks here).
+    * Else, build the model and ``torch.load`` the ckpt.
+    """
+    import torch
+
+    # sys.path side effect + asap3 stub, must happen before importing
+    # densitymodel even when caller supplied the model.
+    import deepdft_ft.runner as _deepdft_runner_module  # noqa: F401
+
+    if model is None:
+        import densitymodel
+
+        if use_painn:
+            model = densitymodel.PainnDensityModel(num_interactions, node_size, cutoff)
+        else:
+            model = densitymodel.DensityModel(num_interactions, node_size, cutoff)
+        if ckpt is not None:
+            state = torch.load(str(ckpt), map_location="cpu", weights_only=False)
+            # DeepDFT's ckpts wrap the state dict in a "model" key
+            state_dict = state.get("model", state)
+            model.load_state_dict(state_dict)
+
+    # Reuse the charge3net data layer (DeepDFT input dict is the same).
+    import charge3net_ft.model as _c3n_wrapper_module  # noqa: F401
+    from src.charge3net.data.collate import collate_list_of_dicts
+    from src.charge3net.data.graph_construction import KdTreeGraphConstructor
+    from src.utils.data import calculate_grid_pos
+    from src.utils.predictions import split_batch
+
+    grid_shape_arr = np.asarray(grid_shape, dtype=np.int64)
+    dummy_density = np.zeros(tuple(grid_shape_arr), dtype=np.float32)
+    origin = np.zeros(3, dtype=np.float64)
+    grid_pos = calculate_grid_pos(dummy_density, origin, atoms.get_cell())
+
+    constructor = KdTreeGraphConstructor(
+        cutoff=cutoff, num_probes=None, disable_pbc=False
+    )
     graph_dict = constructor(dummy_density, atoms, grid_pos)
     batched = collate_list_of_dicts([graph_dict], pin_memory=False)
 

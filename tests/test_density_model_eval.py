@@ -222,8 +222,22 @@ class TestPredictDensity:
         # Smaller batch -> more sub-batches
         assert m2.calls > m1.calls
 
-    def test_deepdft_grid_path_raises_until_d7_beta(self, eval_module):
+    def test_deepdft_with_mock_model_returns_grid(self, eval_module):
+        """DeepDFT shares ChargE3Net's input dict format (the latter was
+        forked from the former), so the dispatcher should reuse the same
+        probe-batching machinery with a DeepDFT-built model. Mock model
+        pins the shape contract."""
+        pytest.importorskip("torch")
+        import torch
+
         from salted_ft.basis import BasisSpec
+
+        # DeepDFT sibling repo is required because the dispatcher's
+        # sys.path side effect goes through deepdft_ft.runner.
+        if not (Path(__file__).resolve().parent.parent.parent / "DeepDFT").exists():
+            pytest.skip("DeepDFT sibling repo not present; integration only")
+        if not (Path(__file__).resolve().parent.parent.parent / "charge3net").exists():
+            pytest.skip("charge3net sibling repo not present")
 
         atoms = ase.Atoms(
             "HH",
@@ -231,8 +245,27 @@ class TestPredictDensity:
             cell=np.eye(3) * 5.0,
             pbc=True,
         )
-        with pytest.raises(NotImplementedError, match="D7"):
-            eval_module.predict_density("deepdft", atoms, (6, 6, 6), None, BasisSpec())
+
+        class DeepDFTMock:
+            def train(self, mode):  # noqa: ARG002
+                return self
+
+            def __call__(self, sub_batch):
+                n = int(sub_batch["num_probes"].item())
+                return torch.full((1, n), 0.5, dtype=torch.float32)
+
+        grid_shape = (4, 4, 4)
+        rho = eval_module.predict_density(
+            "deepdft",
+            atoms,
+            grid_shape,
+            None,
+            BasisSpec(),
+            model=DeepDFTMock(),
+            max_probe_batch=32,
+        )
+        assert rho.shape == grid_shape
+        np.testing.assert_allclose(rho, np.full(grid_shape, 0.5, dtype=np.float32))
 
     def test_unknown_arm_raises_value_error(self, eval_module):
         from salted_ft.basis import BasisSpec
