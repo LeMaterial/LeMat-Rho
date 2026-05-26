@@ -375,7 +375,12 @@ def main():
 
     # Split data into train and validation sets
     datasplits = split_data(densitydata, args)
-    datasplits["train"] = dataset.RotatingPoolData(datasplits["train"], 20)
+    # Pool_size and num_workers downsized for LeMat-Rho cells whose r2SCAN
+    # CHGCARs are larger than the QM9/MP grids upstream was tuned for: the
+    # rotating pool keeps full grids in RAM per worker (pool_size *
+    # num_workers concurrent structures), and a handful of 200-300^3 cells
+    # is enough to OOM the 64 GB job at the upstream 20*4 = 80.
+    datasplits["train"] = dataset.RotatingPoolData(datasplits["train"], 5)
 
     if args.ignore_pbc and args.force_pbc:
         raise ValueError(
@@ -400,7 +405,10 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         datasplits["train"],
         2,
-        num_workers=4,
+        # See RotatingPoolData(...5) above; num_workers compounds the RAM
+        # footprint of the rotating pool. 2 workers x 5 pool = 10 grids in
+        # RAM peak, well below 64 GB for the LeMat-Rho size distribution.
+        num_workers=2,
         sampler=train_sampler,
         collate_fn=dataset.CollateFuncRandomSample(
             args.cutoff, 1000, pin_memory=False, set_pbc_to=set_pbc
