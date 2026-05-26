@@ -122,8 +122,18 @@ class TestPredictDensity:
         )
         assert rho.shape == grid_shape
 
-    def test_charge3net_grid_path_raises_until_d7_beta(self, eval_module):
+    def test_charge3net_with_mock_model_returns_grid(self, eval_module):
+        """Charge3Net dispatcher must build the input dict, batch probes,
+        and reshape to grid. We mock the network with a callable that
+        returns ones at every probe so we can pin the shape contract
+        and the reshape order without a real ckpt."""
+        pytest.importorskip("torch")
+        import torch
+
         from salted_ft.basis import BasisSpec
+
+        if not (Path(__file__).resolve().parent.parent.parent / "charge3net").exists():
+            pytest.skip("charge3net sibling repo not present; integration only")
 
         atoms = ase.Atoms(
             "HH",
@@ -131,10 +141,86 @@ class TestPredictDensity:
             cell=np.eye(3) * 5.0,
             pbc=True,
         )
-        with pytest.raises(NotImplementedError, match="D7"):
-            eval_module.predict_density(
-                "charge3net", atoms, (6, 6, 6), None, BasisSpec()
-            )
+
+        class MockModel:
+            calls = 0
+
+            def train(self, mode):  # noqa: ARG002 -- ignored, present for parity
+                return self
+
+            def __call__(self, sub_batch):
+                MockModel.calls += 1
+                n = int(sub_batch["num_probes"].item())
+                # Charge3net returns shape [B=1, n_probes]
+                return torch.ones((1, n), dtype=torch.float32)
+
+        grid_shape = (6, 6, 6)
+        rho = eval_module.predict_density(
+            "charge3net",
+            atoms,
+            grid_shape,
+            None,
+            BasisSpec(),
+            model=MockModel(),
+            max_probe_batch=64,
+        )
+        assert rho.shape == grid_shape
+        np.testing.assert_array_equal(rho, np.ones(grid_shape, dtype=np.float32))
+        # 6^3 = 216 probes, max_probe_batch=64 -> at least 3 forward calls
+        assert MockModel.calls >= 3
+
+    def test_charge3net_max_probe_batch_controls_chunking(self, eval_module):
+        """Lowering max_probe_batch must increase the number of forward
+        passes proportionally."""
+        pytest.importorskip("torch")
+        import torch
+
+        from salted_ft.basis import BasisSpec
+
+        if not (Path(__file__).resolve().parent.parent.parent / "charge3net").exists():
+            pytest.skip("charge3net sibling repo not present")
+
+        atoms = ase.Atoms(
+            "HH",
+            positions=[[0, 0, 0], [0.74, 0, 0]],
+            cell=np.eye(3) * 5.0,
+            pbc=True,
+        )
+
+        class CountingMock:
+            def __init__(self):
+                self.calls = 0
+
+            def train(self, mode):  # noqa: ARG002
+                return self
+
+            def __call__(self, sub_batch):
+                self.calls += 1
+                n = int(sub_batch["num_probes"].item())
+                return torch.zeros((1, n), dtype=torch.float32)
+
+        m1 = CountingMock()
+        eval_module.predict_density(
+            "charge3net",
+            atoms,
+            (8, 8, 8),
+            None,
+            BasisSpec(),
+            model=m1,
+            max_probe_batch=512,
+        )
+        m2 = CountingMock()
+        eval_module.predict_density(
+            "charge3net",
+            atoms,
+            (8, 8, 8),
+            None,
+            BasisSpec(),
+            model=m2,
+            max_probe_batch=32,
+        )
+        # Smaller batch -> more sub-batches
+        assert m2.calls > m1.calls
 
     def test_deepdft_grid_path_raises_until_d7_beta(self, eval_module):
         from salted_ft.basis import BasisSpec
