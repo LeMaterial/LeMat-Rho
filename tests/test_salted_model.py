@@ -126,6 +126,58 @@ class TestSALTEDModelDeterminism:
             "appears to return position-independent constants"
         )
 
+    def test_baseline_ckpt_loads_and_predicts(self, tmp_path):
+        """Real-mode path: save a D6 baseline ckpt, instantiate SALTEDModel
+        with its path, and verify forward returns the expected shape and
+        the prediction differs from stub-mode output (so we know the
+        ckpt actually drove the result)."""
+        import pytest
+
+        pytest.importorskip("torch")
+        import torch
+
+        from salted_ft.basis import BasisSpec
+        from salted_ft.model import SALTEDModel
+        from salted_ft.train_baseline import SaltedBaselineModel
+
+        spec = BasisSpec()
+        torch.manual_seed(42)
+        baseline = SaltedBaselineModel(spec)
+        ckpt = tmp_path / "salted_baseline.pt"
+        torch.save({"basis_spec": spec, "model": baseline.state_dict()}, ckpt)
+
+        atoms = _cubic_atoms(
+            symbols=("Fe", "Fe"), fractional=((0.1, 0.2, 0.3), (0.4, 0.5, 0.6))
+        )
+
+        m_stub = SALTEDModel(spec)
+        m_loaded = SALTEDModel(spec, ckpt_path=ckpt)
+
+        out_stub = m_stub(atoms)
+        out_loaded = m_loaded(atoms)
+
+        assert out_loaded.shape == (2, spec.n_coeffs_per_atom)
+        assert not np.allclose(out_loaded, out_stub), (
+            "loaded ckpt produced the same output as the stub seed; "
+            "the ckpt path likely is not being exercised"
+        )
+
+    def test_bad_ckpt_format_raises_clearly(self, tmp_path):
+        import pytest
+
+        pytest.importorskip("torch")
+        import torch
+
+        from salted_ft.basis import BasisSpec
+        from salted_ft.model import SALTEDModel
+
+        ckpt = tmp_path / "bad.pt"
+        torch.save({"not_a_baseline": "anything"}, ckpt)
+        m = SALTEDModel(BasisSpec(), ckpt_path=ckpt)
+        atoms = _cubic_atoms()
+        with pytest.raises(RuntimeError, match="baseline format"):
+            m(atoms)
+
     def test_perturbing_non_first_atom_changes_coefficients(self):
         """Regression test for the int.from_bytes(seed_bytes[:16], ...)
         bug: with the old seeding, only atom 0's xyz (the first 24

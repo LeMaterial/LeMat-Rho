@@ -70,12 +70,11 @@ class SALTEDModel:
     ) -> None:
         self.basis_spec = basis_spec
         self.ckpt_path = Path(ckpt_path) if ckpt_path is not None else None
-        if self.ckpt_path is not None:
-            _ensure_rholearn_importable()
-            # Lazy import; defer the heavy load to inference call sites.
-            self._rholearn_model = None
-        else:
-            self._rholearn_model = None
+        # Lazy: model load is deferred to the first inference call.
+        # Renamed _rholearn_model -> _model would be more accurate now
+        # that the baseline path replaced the rholearn forward, but kept
+        # for diff-minimality.
+        self._rholearn_model = None
 
     def __call__(self, atoms: ase.Atoms) -> np.ndarray:
         """Predict coefficients for ``atoms``.
@@ -87,7 +86,7 @@ class SALTEDModel:
         """
         if self.ckpt_path is None:
             return self._stub_predict(atoms)
-        return self._rholearn_predict(atoms)
+        return self._baseline_predict(atoms)
 
     def reconstruct_density(
         self, atoms: ase.Atoms, grid_shape: tuple[int, int, int]
@@ -136,9 +135,36 @@ class SALTEDModel:
         rng = np.random.default_rng(seed_int)
         return rng.standard_normal((n_atoms, n_coeffs), dtype=np.float64) * 1e-3
 
-    def _rholearn_predict(self, atoms: ase.Atoms) -> np.ndarray:
-        """Real rholearn forward pass. Lands in PR gamma-prime."""
-        raise NotImplementedError(
-            "Real rholearn forward pass is deferred to PR gamma-prime. "
-            "Construct SALTEDModel with ckpt_path=None for stub mode."
-        )
+    def _baseline_predict(self, atoms: ase.Atoms) -> np.ndarray:
+        """Load the D6 SchNet-style baseline ckpt and predict coefficients.
+
+        Ckpt format (see ``salted_ft.train_baseline.train``)::
+
+            {"basis_spec": BasisSpec, "model": state_dict}
+
+        The baseline model is cached on first call to amortise the
+        load over many predictions.
+        """
+        # Lazy import: torch is heavy and stub mode does not require it.
+        import torch
+
+        from salted_ft.train_baseline import SaltedBaselineModel
+
+        if self._rholearn_model is None:
+            state = torch.load(
+                str(self.ckpt_path), map_location="cpu", weights_only=False
+            )
+            if "model" not in state:
+                raise RuntimeError(
+                    f"Checkpoint at {self.ckpt_path} is not in the expected "
+                    "baseline format ({'basis_spec': ..., 'model': state_dict}). "
+                    "If this is a rholearn checkpoint, that path is deferred."
+                )
+            model = SaltedBaselineModel(state.get("basis_spec", self.basis_spec))
+            model.load_state_dict(state["model"])
+            model.train(False)
+            self._rholearn_model = model
+
+        with torch.no_grad():
+            pred = self._rholearn_model(atoms)
+        return pred.detach().cpu().numpy().astype(np.float64)
