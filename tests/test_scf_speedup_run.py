@@ -517,3 +517,80 @@ class TestChgcarOrganisation:
         )
         seen = {Path(call["predicted_chgcar_dir"]).resolve() for call in make_calls}
         assert len(seen) == len(records) == 3
+
+    def test_chgcar_layout_is_nested_by_model_then_material_id(
+        self, tmp_path, run_module
+    ):
+        """Layout must be ``chgcar_root/<model>/<material_id>/CHGCAR``
+        so a material_id containing separator characters never causes
+        ambiguity. Was previously a flat ``{model}__{material_id}/``
+        which broke on synthesised IDs like ``oqmd__1234``."""
+        from salted_ft.basis import BasisSpec
+
+        in_parquet = _toy_parquet(tmp_path, n_rows=1)
+        chgcar_dir = tmp_path / "chgcars"
+
+        records = run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=chgcar_dir,
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            make_pair_fn=_make_pair_mock([]),
+            submit_fn=_submit_mock([]),
+        )
+        chgcar_path = Path(records[0]["chgcar_path"])
+        # Path tail must be .../<model>/<material_id>/CHGCAR
+        parts = chgcar_path.parts
+        assert parts[-1] == "CHGCAR"
+        assert parts[-2] == "mp-toy-0"
+        assert parts[-3] == "salted"
+
+
+class TestRealisticRow:
+    """Catch mutation-killers a 2-atom H2 toy row misses: a missing
+    n_electrons rescale, a positions-reshape bug, or a grid/atom
+    mismatch all pass silently on the degenerate fixture."""
+
+    def test_5_atom_asymmetric_grid_unequal_n_electrons(self, tmp_path, run_module):
+        from salted_ft.basis import BasisSpec
+
+        # 5 atoms: 1 Fe + 4 O (chosen so sum(Z)=26+4*8=58 != n_electrons=12.5).
+        # Asymmetric grid_shape catches axes-swap bugs.
+        n_atoms = 5
+        atomic_numbers = np.array([26, 8, 8, 8, 8], dtype=np.int64)
+        rng = np.random.default_rng(0)
+        positions = rng.uniform(0, 5, size=(n_atoms, 3)).astype(np.float64)
+        rows = [
+            {
+                "material_id": "mp-realistic-0",
+                "n_atoms": n_atoms,
+                "atomic_numbers": atomic_numbers,
+                "positions": positions.reshape(-1),
+                "lattice_vectors": (np.eye(3) * 5.0).reshape(-1),
+                "grid_shape": np.array([8, 10, 12], dtype=np.int64),
+                "n_electrons": 12.5,
+            }
+        ]
+        in_parquet = tmp_path / "realistic.parquet"
+        pd.DataFrame(rows).to_parquet(in_parquet)
+
+        make_calls: list = []
+        records = run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=tmp_path / "chgcars",
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            make_pair_fn=_make_pair_mock(make_calls),
+            submit_fn=_submit_mock([]),
+        )
+        # The row completed without error -- reshape correct, write_chgcar
+        # accepted asymmetric grid, n_electrons propagated to write_chgcar.
+        assert len(records) == 1
+        assert records[0]["error"] is None, f"unexpected error: {records[0]['error']}"
+        assert records[0]["submitted"] is False  # dry-run

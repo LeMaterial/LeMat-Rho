@@ -172,8 +172,10 @@ def run_experiment(
             density = predict_density(model_name, atoms, grid_shape, ckpt, basis_spec)
 
             # One directory per (model, material_id) so make_scf_speedup_pair's
-            # prev_dir mechanism stages the right file.
-            row_dir = chgcar_root / f"{model_name}__{material_id}"
+            # prev_dir mechanism stages the right file. Nested layout
+            # (chgcar_root/<model>/<material_id>/CHGCAR) avoids ambiguity
+            # for material_ids that contain separator characters.
+            row_dir = chgcar_root / model_name / material_id
             row_dir.mkdir(parents=True, exist_ok=True)
             chgcar_path = row_dir / "CHGCAR"
             write_chgcar(density, atoms, chgcar_path, n_electrons=n_electrons)
