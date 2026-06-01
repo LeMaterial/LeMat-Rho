@@ -294,6 +294,205 @@ class TestArmCheckpointGuard:
         assert records[0]["ckpt"] == "stub"
 
 
+class TestPerRowResilience:
+    """A multi-hour batch must not die on a single bad row."""
+
+    def test_per_row_failure_does_not_abort_loop(self, tmp_path, run_module):
+        """If row 2 of 3 has a corrupt cell (positions with wrong
+        length) the loop must skip it, record the failure, and keep
+        going. Otherwise the prior rows' Flows are submitted to
+        Mongo with no clean resume path."""
+        from salted_ft.basis import BasisSpec
+
+        # 3 rows, middle one has corrupt positions.
+        rows = []
+        grid_shape = (4, 4, 4)
+        good_positions = np.array(
+            [[0.0, 0.0, 0.0], [0.74, 0.0, 0.0]], dtype=np.float64
+        ).reshape(-1)
+        for i in range(3):
+            pos = good_positions
+            if i == 1:
+                # Length 2: positions.reshape(-1, 3) raises.
+                pos = np.array([0.0, 0.0], dtype=np.float64)
+            rows.append(
+                {
+                    "material_id": f"mp-toy-{i}",
+                    "n_atoms": 2,
+                    "atomic_numbers": np.array([1, 1], dtype=np.int64),
+                    "positions": pos,
+                    "lattice_vectors": (np.eye(3) * 5.0).reshape(-1),
+                    "grid_shape": np.array(grid_shape, dtype=np.int64),
+                    "n_electrons": 2.0,
+                }
+            )
+        in_parquet = tmp_path / "held_out_with_bad_row.parquet"
+        pd.DataFrame(rows).to_parquet(in_parquet)
+
+        records = run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=tmp_path / "chgcars",
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            make_pair_fn=_make_pair_mock([]),
+            submit_fn=_submit_mock([]),
+        )
+        assert len(records) == 3
+        good = [r for r in records if r.get("error") is None]
+        bad = [r for r in records if r.get("error") is not None]
+        assert len(good) == 2
+        assert len(bad) == 1
+        assert bad[0]["material_id"] == "mp-toy-1"
+        assert bad[0]["submitted"] is False
+        assert "reshape" in bad[0]["error"] or "cannot" in bad[0]["error"]
+
+
+class TestManifest:
+    def test_manifest_jsonl_written_after_each_row(self, tmp_path, run_module):
+        """The manifest must be written incrementally so an
+        interrupted run leaves a resumable record. After all rows
+        complete the manifest should have one JSONL line per row."""
+        import json
+
+        from salted_ft.basis import BasisSpec
+
+        in_parquet = _toy_parquet(tmp_path, n_rows=3)
+        chgcar_dir = tmp_path / "chgcars"
+        manifest = tmp_path / "manifest.jsonl"
+
+        run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=chgcar_dir,
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            manifest_path=manifest,
+            make_pair_fn=_make_pair_mock([]),
+            submit_fn=_submit_mock([]),
+        )
+        assert manifest.exists()
+        lines = manifest.read_text().splitlines()
+        assert len(lines) == 3
+        for line in lines:
+            rec = json.loads(line)
+            assert "material_id" in rec
+            assert "model" in rec
+
+    def test_manifest_defaults_to_chgcar_dir(self, tmp_path, run_module):
+        """If --manifest is not given, default to
+        chgcar_dir/manifest.jsonl so a re-run can find it by
+        convention."""
+        from salted_ft.basis import BasisSpec
+
+        in_parquet = _toy_parquet(tmp_path, n_rows=1)
+        chgcar_dir = tmp_path / "chgcars"
+
+        run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=chgcar_dir,
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            make_pair_fn=_make_pair_mock([]),
+            submit_fn=_submit_mock([]),
+        )
+        assert (chgcar_dir / "manifest.jsonl").exists()
+
+
+class TestSkipExisting:
+    def test_skip_existing_skips_already_submitted_rows(self, tmp_path, run_module):
+        """Pre-populate a manifest with one submitted row, then
+        re-run with skip_existing=True; only the unseen rows should
+        be processed."""
+        import json
+
+        from salted_ft.basis import BasisSpec
+
+        in_parquet = _toy_parquet(tmp_path, n_rows=3)
+        chgcar_dir = tmp_path / "chgcars"
+        chgcar_dir.mkdir()
+        manifest = chgcar_dir / "manifest.jsonl"
+        # Mark mp-toy-1 as already done.
+        manifest.write_text(
+            json.dumps(
+                {
+                    "material_id": "mp-toy-1",
+                    "model": "salted",
+                    "submitted": True,
+                    "error": None,
+                }
+            )
+            + "\n"
+        )
+        make_calls: list = []
+        records = run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=chgcar_dir,
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            skip_existing=True,
+            manifest_path=manifest,
+            make_pair_fn=_make_pair_mock(make_calls),
+            submit_fn=_submit_mock([]),
+        )
+        # mp-toy-1 should NOT have been re-processed.
+        processed_ids = {call["metadata"]["material_id"] for call in make_calls}
+        assert "mp-toy-1" not in processed_ids
+        assert processed_ids == {"mp-toy-0", "mp-toy-2"}
+        # Records reflect what THIS run did, not the historical entry.
+        assert len(records) == 2
+
+    def test_skip_existing_does_not_skip_failed_rows(self, tmp_path, run_module):
+        """A row in the manifest with submitted=False (error from a
+        previous run) should be retried on the next run, not skipped."""
+        import json
+
+        from salted_ft.basis import BasisSpec
+
+        in_parquet = _toy_parquet(tmp_path, n_rows=2)
+        chgcar_dir = tmp_path / "chgcars"
+        chgcar_dir.mkdir()
+        manifest = chgcar_dir / "manifest.jsonl"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "material_id": "mp-toy-0",
+                    "model": "salted",
+                    "submitted": False,
+                    "error": "previous_run_died",
+                }
+            )
+            + "\n"
+        )
+        make_calls: list = []
+        run_module.run_experiment(
+            model_name="salted",
+            test_parquet=in_parquet,
+            chgcar_dir=chgcar_dir,
+            basis_spec=BasisSpec(),
+            project="p",
+            worker="w",
+            dry_run=True,
+            skip_existing=True,
+            manifest_path=manifest,
+            make_pair_fn=_make_pair_mock(make_calls),
+            submit_fn=_submit_mock([]),
+        )
+        processed_ids = {call["metadata"]["material_id"] for call in make_calls}
+        # mp-toy-0 was previously failed, should be retried.
+        assert "mp-toy-0" in processed_ids
+
+
 class TestChgcarOrganisation:
     def test_per_row_chgcar_dirs_are_unique(self, tmp_path, run_module):
         """make_scf_speedup_pair takes a directory and stages CHGCAR
