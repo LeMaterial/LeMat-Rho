@@ -17,11 +17,12 @@ where ``i`` indexes atoms, ``n`` is the radial channel, ``(l, m)`` are the
 real spherical harmonic indices, ``phi_n`` is a Gaussian of width
 ``sigma_n``, and ``Y_lm`` is a real spherical harmonic.
 
-We use the **orthonormal-approximation projection**: each coefficient is
-the inner product of the density with the corresponding basis function,
-normalized by the basis function's L2 norm. This is exact iff the basis
-is orthonormal; for our Gaussians it's a v1 stand-in for a proper
-overlap-matrix least-squares solve, which lands in a follow-up PR.
+Projection solves a single global least-squares system: we build the
+per-structure design matrix of every basis function evaluated at every
+grid point and fit all atoms' coefficients simultaneously with
+``np.linalg.lstsq``. This accounts for the strong overlap between our
+Gaussians (an earlier per-channel orthonormal approximation overcounted
+overlapping contributions and produced ~1000% NMAPE).
 
 Reconstruction is the literal sum on the right-hand side.
 
@@ -222,11 +223,10 @@ def project_chgcar_to_basis(
 ) -> np.ndarray:
     """Project a real-space density grid onto the atom-centered basis.
 
-    Uses orthonormal-approximation: each coefficient is the L2 inner
-    product of the density with the corresponding basis function,
-    divided by the basis function's own squared L2 norm. Exact when
-    the basis is orthonormal; a v1 stand-in until PR gamma (which will
-    swap in proper overlap-matrix LSQR).
+    Solves one global least-squares system (``np.linalg.lstsq``) over
+    the full design matrix of all atoms' basis functions evaluated at
+    every grid point, so overlap between basis functions is handled
+    exactly rather than via a per-channel orthonormal approximation.
 
     Parameters
     ----------

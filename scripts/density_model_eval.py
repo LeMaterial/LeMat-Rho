@@ -12,11 +12,12 @@ Arm coverage
 * ``salted`` -- fully wired. Stub mode (no ckpt) is supported via
    ``SALTEDModel(basis_spec, ckpt_path=None)``; real mode lands when
    D6 (SALTED training driver) produces a checkpoint.
-* ``charge3net`` -- grid prediction (probe batching over Nx*Ny*Nz
-   grid coordinates) lands in D7-beta. Raises NotImplementedError
-   here so a future user does not silently get stub metrics from a
-   real-arm name.
-* ``deepdft`` -- same as ``charge3net``.
+* ``charge3net`` -- fully wired via ``_charge3net_predict_grid``
+   (full-grid graph built with charge3net's KdTreeGraphConstructor,
+   probes batched over the Nx*Ny*Nz grid coordinates).
+* ``deepdft`` -- fully wired via ``_deepdft_predict_grid`` (reuses the
+   same graph construction; needs the DeepDFT sibling clone on
+   sys.path via ``deepdft_ft.runner``).
 
 The Graph2Mat arm is parked (see graph2mat_ft/__init__.py); not
 exposed here.
@@ -210,11 +211,12 @@ def _deepdft_predict_grid(
             model.load_state_dict(state_dict)
 
     # Reuse the charge3net data layer (DeepDFT input dict is the same).
-    import charge3net_ft.model as _c3n_wrapper_module  # noqa: F401
     from src.charge3net.data.collate import collate_list_of_dicts
     from src.charge3net.data.graph_construction import KdTreeGraphConstructor
     from src.utils.data import calculate_grid_pos
     from src.utils.predictions import split_batch
+
+    import charge3net_ft.model as _c3n_wrapper_module  # noqa: F401
 
     grid_shape_arr = np.asarray(grid_shape, dtype=np.int64)
     dummy_density = np.zeros(tuple(grid_shape_arr), dtype=np.float32)

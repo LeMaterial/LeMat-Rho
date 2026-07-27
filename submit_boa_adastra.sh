@@ -29,7 +29,7 @@ set -eo pipefail
 
 # --- Paths ---
 # Submit dir must be on a scratch with inode headroom (cad16353 currently); the
-# account (--account=c1816212 above) handles billing independently. See ADASTRA.md.
+# account (--account=c1816212 above) handles billing independently.
 SETUP="${LEMATRHO_ADASTRA_SETUP:-/lus/scratch/CT10/cad16353/msiron/charge3net_setup}"
 WORK_DIR="$SETUP/LeMat-Rho"
 BOA_CLONE="$SETUP/boa"
