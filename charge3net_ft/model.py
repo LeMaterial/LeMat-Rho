@@ -27,7 +27,7 @@ if not _CHARGE3NET_ROOT.exists():
 if str(_CHARGE3NET_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHARGE3NET_ROOT))
 
-from src.charge3net.models.e3 import E3DensityModel  # noqa: E402
+from src.charge3net.models.e3 import E3DensityModel
 
 # ---------------------------------------------------------------------------
 # Default hyperparameters matching the Materials Project checkpoint
@@ -61,7 +61,7 @@ class ChargE3NetWrapper(nn.Module):
         Override any of the default MP hyperparameters.
     """
 
-    def __init__(self, ckpt_path: str = None, **model_kwargs):
+    def __init__(self, ckpt_path: str | None = None, **model_kwargs):
         super().__init__()
 
         # Merge user overrides with MP defaults
@@ -115,7 +115,7 @@ class ChargE3NetWrapper(nn.Module):
                 state_dict = checkpoint
                 print(f"Loaded raw state_dict from {ckpt_path}")
         else:
-            raise ValueError(f"Unexpected checkpoint format: {type(checkpoint)}")
+            raise TypeError(f"Unexpected checkpoint format: {type(checkpoint)}")
 
         missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
         if missing:

@@ -17,7 +17,7 @@ at angular momentum ``l``. So our ``n_radial=4, max_l=4`` maps to
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from graph2mat import PointBasis
 

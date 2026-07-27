@@ -15,7 +15,6 @@ import json
 import sys
 from functools import partial
 from pathlib import Path
-from typing import Optional
 
 import ase
 import ase.data
@@ -39,9 +38,9 @@ if not _CHARGE3NET_ROOT.exists():
 if str(_CHARGE3NET_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHARGE3NET_ROOT))
 
-from src.charge3net.data.collate import collate_list_of_dicts  # noqa: E402
-from src.charge3net.data.graph_construction import KdTreeGraphConstructor  # noqa: E402
-from src.utils.data import calculate_grid_pos  # noqa: E402
+from src.charge3net.data.collate import collate_list_of_dicts
+from src.charge3net.data.graph_construction import KdTreeGraphConstructor
+from src.utils.data import calculate_grid_pos
 
 # Columns we actually need from Parquet
 _COLUMNS = [
@@ -173,10 +172,10 @@ class LeMatRhoDataset(Dataset):
 
     def __init__(
         self,
-        parquet_dir: str = None,
+        parquet_dir: str | None = None,
         cutoff: float = 4.0,
-        num_probes: Optional[int] = None,
-        _shared_index: tuple = None,
+        num_probes: int | None = None,
+        _shared_index: tuple | None = None,
     ):
         self.cutoff = cutoff
         self.num_probes = num_probes

@@ -145,7 +145,7 @@ class TestPredictDensity:
         class MockModel:
             calls = 0
 
-            def train(self, mode):  # noqa: ARG002 -- ignored, present for parity
+            def train(self, mode):
                 return self
 
             def __call__(self, sub_batch):
@@ -191,7 +191,7 @@ class TestPredictDensity:
             def __init__(self):
                 self.calls = 0
 
-            def train(self, mode):  # noqa: ARG002
+            def train(self, mode):
                 return self
 
             def __call__(self, sub_batch):
@@ -247,7 +247,7 @@ class TestPredictDensity:
         )
 
         class DeepDFTMock:
-            def train(self, mode):  # noqa: ARG002
+            def train(self, mode):
                 return self
 
             def __call__(self, sub_batch):

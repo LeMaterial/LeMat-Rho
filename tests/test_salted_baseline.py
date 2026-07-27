@@ -51,10 +51,10 @@ class TestModelForward:
 
     def test_output_finite(self):
         pytest.importorskip("torch")
+        import torch
+
         from salted_ft.basis import BasisSpec
         from salted_ft.train_baseline import SaltedBaselineModel
-
-        import torch
 
         m = SaltedBaselineModel(BasisSpec())
         out = m(_feo_atoms())

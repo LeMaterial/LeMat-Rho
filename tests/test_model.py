@@ -5,22 +5,26 @@ Tests all three checkpoint format branches using mock state dicts,
 without requiring the real charge3net repo or a GPU.
 """
 
-import pytest
-import torch
-import torch.nn as nn
-from unittest.mock import patch
 import sys
 import tempfile
+from unittest.mock import patch
+
+import pytest
+import torch
+from torch import nn
 
 
 def _make_mock_e3density():
     """Return a tiny 2-param nn.Module standing in for E3DensityModel."""
+
     class _Tiny(nn.Module):
         def __init__(self, **kwargs):
             super().__init__()
             self.w = nn.Parameter(torch.zeros(2))
+
         def forward(self, x):
             return x
+
     return _Tiny
 
 
@@ -35,12 +39,15 @@ def _import_wrapper():
     MockModel = _make_mock_e3density()
     fake["src.charge3net.models.e3"].E3DensityModel = MockModel
 
-    with patch.dict(sys.modules, fake):
-        with patch("pathlib.Path.exists", return_value=True):
-            if "charge3net_ft.model" in sys.modules:
-                del sys.modules["charge3net_ft.model"]
-            import importlib
-            mod = importlib.import_module("charge3net_ft.model")
+    with (
+        patch.dict(sys.modules, fake),
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        if "charge3net_ft.model" in sys.modules:
+            del sys.modules["charge3net_ft.model"]
+        import importlib
+
+        mod = importlib.import_module("charge3net_ft.model")
     return mod.ChargE3NetWrapper, MockModel
 
 
@@ -96,5 +103,5 @@ class TestLoadPretrained:
             path = f.name
         torch.save("not_a_dict", path)
         w = WrapperCls()
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             w.load_pretrained(path)

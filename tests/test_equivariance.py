@@ -36,8 +36,8 @@ if not _CHARGE3NET_ROOT.exists():
 if str(_CHARGE3NET_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHARGE3NET_ROOT))
 
-from e3nn import o3  # noqa: E402
-from src.charge3net.models.e3 import E3DensityModel  # noqa: E402
+from e3nn import o3
+from src.charge3net.models.e3 import E3DensityModel
 
 
 @pytest.fixture(scope="module")

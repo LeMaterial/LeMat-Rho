@@ -24,8 +24,9 @@ import importlib
 import json
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import ase
 import numpy as np
@@ -206,15 +207,14 @@ def run_experiment(
                 record["n_jobs"],
                 record["submitted"],
             )
-        except Exception as exc:  # noqa: BLE001 -- isolate per-row failures
+        except Exception as exc:
             # Catch broadly: any per-row exception (corrupt parquet, ML
             # OOM, mongo timeout) must not kill the rest of the batch.
             record["error"] = repr(exc)
             logger.exception(
-                "Row failed material_id=%s arm=%s: %s",
+                "Row failed material_id=%s arm=%s",
                 material_id,
                 model_name,
-                exc,
             )
         finally:
             # Stream to manifest after every row so an interrupted

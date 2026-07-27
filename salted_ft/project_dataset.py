@@ -95,7 +95,7 @@ def project_chunk(
                 "material_id": (
                     table.column("material_id")[ri].as_py() if has_material_id else ""
                 ),
-                "n_atoms": int(len(atoms)),
+                "n_atoms": len(atoms),
                 "atomic_numbers": atoms.get_atomic_numbers().tolist(),
                 "lattice_vectors": cell.tolist(),
                 "n_electrons": n_electrons,

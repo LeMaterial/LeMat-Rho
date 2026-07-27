@@ -31,16 +31,16 @@ Notes
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import ase
 import numpy as np
 import pyarrow.parquet as pq
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from ase.neighborlist import primitive_neighbor_list
+from torch import nn
 
 from salted_ft.basis import BasisSpec
 

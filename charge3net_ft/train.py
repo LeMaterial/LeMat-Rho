@@ -41,10 +41,10 @@ if not _CHARGE3NET_ROOT.exists():
 if str(_CHARGE3NET_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHARGE3NET_ROOT))
 
-from src.charge3net.models.scheduler import PowerDecayScheduler  # noqa: E402
+from src.charge3net.models.scheduler import PowerDecayScheduler
 
-from .data import build_dataloaders  # noqa: E402
-from .model import ChargE3NetWrapper  # noqa: E402
+from .data import build_dataloaders
+from .model import ChargE3NetWrapper
 
 
 # ---------------------------------------------------------------------------

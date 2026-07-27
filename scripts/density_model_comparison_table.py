@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 _METRIC_COLS = ("nmape", "rmse", "nrmse")
 
 

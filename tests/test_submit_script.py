@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pytest
 
-
 SUBMIT_SCRIPT = Path(__file__).resolve().parent.parent / "submit_charge3net_adastra.sh"
 
 

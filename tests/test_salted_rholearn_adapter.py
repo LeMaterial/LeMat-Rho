@@ -19,7 +19,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # rholearn's lmax / nmax dict format (from rholearn/utils/convert.py docstrings)
 #
@@ -39,7 +38,7 @@ class TestBuildLmaxNmaxDicts:
         from salted_ft.basis import BasisSpec
         from salted_ft.rholearn_adapter import build_lmax_nmax
 
-        lmax, nmax = build_lmax_nmax(BasisSpec(), species=("H", "O", "Fe"))
+        lmax, _nmax = build_lmax_nmax(BasisSpec(), species=("H", "O", "Fe"))
         assert set(lmax) == {"H", "O", "Fe"}
 
     def test_lmax_value_matches_basis_spec(self):

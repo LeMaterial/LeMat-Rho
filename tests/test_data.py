@@ -42,15 +42,17 @@ def _import_data_utils():
     stubs["src.charge3net.data.graph_construction"].KdTreeGraphConstructor = object
     stubs["src.utils.data"].calculate_grid_pos = lambda *a, **kw: None
 
-    with patch.dict(sys.modules, stubs):
-        # Also patch the existence check so it doesn't raise
-        with patch("pathlib.Path.exists", return_value=True):
-            import importlib
+    # Also patch the existence check so it doesn't raise
+    with (
+        patch.dict(sys.modules, stubs),
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        import importlib
 
-            # Force reimport with stubs in place
-            if "charge3net_ft.data" in sys.modules:
-                del sys.modules["charge3net_ft.data"]
-            mod = importlib.import_module("charge3net_ft.data")
+        # Force reimport with stubs in place
+        if "charge3net_ft.data" in sys.modules:
+            del sys.modules["charge3net_ft.data"]
+        mod = importlib.import_module("charge3net_ft.data")
     return mod
 
 
@@ -84,10 +86,11 @@ class TestRowToAtomsAndDensity:
 
     def test_atoms_species(self):
         import ase
+
         from charge3net_ft.data import _row_to_atoms_and_density
 
         row = self._make_row()
-        atoms, density, origin = _row_to_atoms_and_density(row)
+        atoms, _density, _origin = _row_to_atoms_and_density(row)
         assert isinstance(atoms, ase.Atoms)
         assert list(atoms.get_chemical_symbols()) == ["Fe", "O"]
 
@@ -164,9 +167,8 @@ class TestBuildParquetIndex:
     def test_raises_on_empty_dir(self):
         from charge3net_ft.data import _build_parquet_index
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with pytest.raises(FileNotFoundError):
-                _build_parquet_index(Path(tmp))
+        with tempfile.TemporaryDirectory() as tmp, pytest.raises(FileNotFoundError):
+            _build_parquet_index(Path(tmp))
 
     def test_ignores_extra_columns(self):
         """Newer LeMat-Rho dataset versions add Bader-analysis columns (e.g.

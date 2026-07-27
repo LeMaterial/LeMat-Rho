@@ -31,13 +31,12 @@ it does.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 
 from salted_ft.basis import BasisSpec
-
 
 # Path setup for lazy rholearn import. Same pattern as
 # charge3net_ft/model.py and deepdft_ft/runner.py.
@@ -181,7 +180,7 @@ def dense_to_tensormap(
     pure numpy).
     """
     _ensure_rholearn_importable()
-    import chemfiles  # noqa: F401  (needed by rholearn's converter)
+    import chemfiles
     from rholearn.utils import convert  # type: ignore[import-not-found]
 
     flat = dense_to_rholearn_flat(coeffs, basis_spec, symbols)
