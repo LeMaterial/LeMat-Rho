@@ -1,9 +1,11 @@
 """Tests for the boa_ft parquet -> LMDB preprocessor.
 
 Covers the pure row-to-graph conversion, the datasplit writer, and a small
-end-to-end run that round-trips through BOA's ``LmdbDataset``. These require the
-sibling ``boa`` clone (for ``scdp``) and ``charge3net`` (for the shared parquet
-decoder), so they run in the boa_ft environment described in boa_ft/README.md.
+end-to-end run that round-trips through BOA's ``LmdbDataset``. The pure-helper
+tests (max-z filter, datasplit writer, bounded table cache) run anywhere; the
+graph and LMDB round-trip tests require the sibling ``boa`` clone (for
+``scdp``) and ``charge3net`` (for the shared parquet decoder), so they skip
+outside the boa_ft environment described in boa_ft/README.md.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 # A 4x4x4 grid keeps the probe count small (64) while still being a real 3D box.
 _GRID_N = 4
@@ -43,6 +46,7 @@ class TestRowToAtomicData:
     """A parquet row becomes an scdp AtomicData with the expected fields."""
 
     def _one_graph(self, tmp: Path):
+        pytest.importorskip("scdp")
         from scdp.scripts.preprocess import get_atomic_number_table_from_zs
 
         from boa_ft.preprocess import row_to_atomic_data
@@ -126,12 +130,60 @@ class TestWriteDatasplits:
             assert a == b
 
 
+class TestReadRowCached:
+    """The preprocess table cache is a bounded LRU, not an unbounded dict.
+
+    Mirrors the 5-chunk LRU in ``deepdft_ft.data`` (the unbounded variant
+    held every decompressed pyarrow table for the whole run).
+    """
+
+    def test_cache_never_exceeds_cap(self):
+        import collections
+
+        from boa_ft.preprocess import _TABLE_CACHE_MAX_CHUNKS, read_row_cached
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            n_chunks = _TABLE_CACHE_MAX_CHUNKS + 2
+            file_paths = []
+            for i in range(n_chunks):
+                p = tmp / f"chunk_{i:03d}.parquet"
+                _write_synthetic_chunk(p, n_valid=1)
+                file_paths.append(p)
+            cache: collections.OrderedDict = collections.OrderedDict()
+            for fi in range(n_chunks):
+                read_row_cached(file_paths, fi, 0, cache)
+            assert len(cache) <= _TABLE_CACHE_MAX_CHUNKS
+
+    def test_reread_after_eviction_roundtrips(self):
+        import collections
+
+        from boa_ft.preprocess import _TABLE_CACHE_MAX_CHUNKS, read_row_cached
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            n_chunks = _TABLE_CACHE_MAX_CHUNKS + 2
+            file_paths = []
+            for i in range(n_chunks):
+                p = tmp / f"chunk_{i:03d}.parquet"
+                _write_synthetic_chunk(p, n_valid=1)
+                file_paths.append(p)
+            cache: collections.OrderedDict = collections.OrderedDict()
+            first = read_row_cached(file_paths, 0, 0, cache)
+            for fi in range(n_chunks):  # cycle far enough to evict chunk 0
+                read_row_cached(file_paths, fi, 0, cache)
+            again = read_row_cached(file_paths, 0, 0, cache)
+            assert again == first
+
+
 class TestPreprocessEndToEnd:
     """A full run writes shards + metadata that LmdbDataset can read back."""
 
     def test_roundtrip_through_lmdb_dataset(self):
         import argparse
 
+        pytest.importorskip("scdp")
+        pytest.importorskip("boa")
         from boa.data.dataset import LmdbDataset
 
         from boa_ft.preprocess import main

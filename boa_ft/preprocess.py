@@ -25,24 +25,24 @@ skipped and counted.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import pickle
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+import pyarrow.parquet as pq
 import torch
 from ase.data import atomic_numbers as ASE_ATOMIC_NUMBERS
-
-# scdp lives in the sibling boa clone, editable-installed. See boa_ft/README.md.
-from scdp.data.data import AtomicData
-from scdp.scripts.preprocess import get_atomic_number_table_from_zs
 from tqdm import tqdm
 
-# Shared LeMat-Rho parquet pipeline (same helpers the other arms import).
-from charge3net_ft.data import (
-    _build_parquet_index,
-    _row_to_atoms_and_density,
-)
+# scdp (sibling boa clone, editable-installed; see boa_ft/README.md) and the
+# shared charge3net_ft parquet pipeline (needs the ../charge3net sibling) are
+# imported lazily inside the functions that need them, so the pure helpers
+# (row_exceeds_max_z, write_datasplits) import cleanly without either sibling.
+if TYPE_CHECKING:
+    from scdp.data.data import AtomicData
 
 
 def row_to_atomic_data(
@@ -72,6 +72,10 @@ def row_to_atomic_data(
     scdp.data.data.AtomicData
         Graph carrying atoms, cell, full probe grid, and flattened density.
     """
+    from scdp.data.data import AtomicData
+
+    from charge3net_ft.data import _row_to_atoms_and_density
+
     atoms, density, _origin = _row_to_atoms_and_density(row)
 
     atom_types = torch.from_numpy(atoms.numbers).long()
@@ -96,6 +100,47 @@ def row_to_atomic_data(
         max_neighbors=max_neighbors,
         struct=None,
     )
+
+
+# Same bound as the per-worker LRU table caches in deepdft_ft.data and
+# charge3net_ft.data: each cached entry is a fully decompressed pyarrow
+# table, so an unbounded cache eventually holds the whole dataset in RAM.
+_TABLE_CACHE_MAX_CHUNKS = 5
+
+
+def read_row_cached(
+    file_paths: list[Path],
+    fi: int,
+    ri: int,
+    cache: collections.OrderedDict,
+    max_chunks: int = _TABLE_CACHE_MAX_CHUNKS,
+) -> dict:
+    """Read one parquet row, keeping at most ``max_chunks`` tables cached (LRU).
+
+    Parameters
+    ----------
+    file_paths : list of Path
+        Parquet chunk files, indexed by ``fi``.
+    fi, ri : int
+        File index and row index within that file.
+    cache : collections.OrderedDict
+        Caller-owned LRU cache mapping file index to pyarrow table.
+    max_chunks : int
+        Cache capacity; least recently used tables are evicted beyond it.
+
+    Returns
+    -------
+    dict
+        Column-name-to-value mapping for the requested row.
+    """
+    if fi in cache:
+        cache.move_to_end(fi)
+    else:
+        cache[fi] = pq.read_table(file_paths[fi])
+        while len(cache) > max_chunks:
+            cache.popitem(last=False)
+    table = cache[fi]
+    return {col: table.column(col)[ri].as_py() for col in table.column_names}
 
 
 def row_exceeds_max_z(row: dict, max_z: int) -> bool:
@@ -172,6 +217,10 @@ def write_datasplits(
 
 def main(args: argparse.Namespace) -> None:
     """Run the parquet -> LMDB conversion and write splits + basis metadata."""
+    from scdp.scripts.preprocess import get_atomic_number_table_from_zs
+
+    from charge3net_ft.data import _build_parquet_index
+
     out_dir = Path(args.out_dir)
     data_dir = out_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -200,16 +249,10 @@ def main(args: argparse.Namespace) -> None:
     # union over the train split (see write below), not the whole dataset.
     sample_elements: list[set[int]] = []
 
-    # Per-chunk table cache so each parquet file is read at most once.
-    import pyarrow.parquet as pq
-
-    table_cache: dict[int, object] = {}
-
-    def read_row(fi: int, ri: int) -> dict:
-        if fi not in table_cache:
-            table_cache[fi] = pq.read_table(file_paths[fi])
-        table = table_cache[fi]
-        return {col: table.column(col)[ri].as_py() for col in table.column_names}
+    # Bounded per-chunk LRU table cache (see read_row_cached): rows are
+    # processed in contiguous blocks, so a small cache still gives one
+    # read per file without holding every decompressed table in RAM.
+    table_cache: collections.OrderedDict = collections.OrderedDict()
 
     for shard_id, block in enumerate(shard_blocks):
         if len(block) == 0:
@@ -227,7 +270,7 @@ def main(args: argparse.Namespace) -> None:
             fi, ri = index[int(global_pos)]
             chunk_stem = file_paths[fi].stem
             metadata = f"{chunk_stem}_row{ri:06d}"
-            row = read_row(fi, ri)
+            row = read_row_cached(file_paths, fi, ri, table_cache)
             if args.max_z is not None and row_exceeds_max_z(row, args.max_z):
                 n_heavy += 1
                 continue
