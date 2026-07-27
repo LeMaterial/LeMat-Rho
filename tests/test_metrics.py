@@ -1,22 +1,19 @@
 """
 Unit tests for charge3net_ft metric functions.
 
-These tests use synthetic tensors with known ground-truth values and do not
-require real data, GPU, or the charge3net dependency.
+These tests use synthetic tensors with known ground-truth values and no real
+data or GPU. Importing ``charge3net_ft.train`` requires the ``../charge3net``
+sibling clone (its module-level sys.path block raises RuntimeError without
+it), so the whole module skips when the sibling is absent.
 """
 
 import pytest
 import torch
 
-# Import directly so tests work without the charge3net sibling repo installed
-import sys
-
-# Patch the charge3net path check so we can import train.py without the repo
-sys.modules.setdefault("src", type(sys)("src"))
-
-# We import the metric functions directly by exec'ing only the relevant parts
-# of train.py to avoid triggering the charge3net sys.path block at module level.
-from charge3net_ft.train import compute_nmape, compute_nrmse, compute_rmse  # noqa: E402
+try:
+    from charge3net_ft.train import compute_nmape, compute_nrmse, compute_rmse
+except (ImportError, RuntimeError) as exc:
+    pytest.skip(f"charge3net sibling repo unavailable: {exc}", allow_module_level=True)
 
 
 class TestComputeNmape:
@@ -44,13 +41,21 @@ class TestComputeNmape:
         masked = compute_nmape(preds, targets, num_probes).item()
         assert masked == pytest.approx(100.0, rel=1e-4)
 
-    def test_mask_vs_no_mask_differ_when_padding_nonzero(self):
-        # Without mask, zero-padding in targets dilutes the denominator
-        preds = torch.tensor([[0.0, 0.0, 0.0]])
-        targets = torch.tensor([[2.0, 2.0, 100.0]])  # row 3 is "padding"
+    def test_mask_vs_no_mask_differ_when_padding_predicted_well(self):
+        # Real probes are mispredicted while the padding probe is predicted
+        # perfectly, so including the padding in the sums dilutes the error:
+        # masked and unmasked NMAPE must disagree. (With all-zero preds the
+        # numerator equals the denominator and both paths give 100%, which
+        # is why preds here must be nonzero.)
+        preds = torch.tensor([[1.0, 1.0, 100.0]])
+        targets = torch.tensor([[2.0, 2.0, 100.0]])  # probe 3 is "padding"
         num_probes = torch.tensor([2])
         masked = compute_nmape(preds, targets, num_probes).item()
         unmasked = compute_nmape(preds, targets).item()
+        # Masked: |2-1| + |2-1| over |2| + |2| = 2/4 = 50%.
+        assert masked == pytest.approx(50.0, rel=1e-4)
+        # Unmasked: 2 / 104, diluted by the well-predicted padding probe.
+        assert unmasked == pytest.approx(2.0 / 104.0 * 100.0, rel=1e-4)
         assert masked != pytest.approx(unmasked, rel=1e-2)
 
 
@@ -70,7 +75,9 @@ class TestComputeRmse:
         preds = torch.zeros(1, 2)
         targets = torch.tensor([[3.0, 999.0]])
         num_probes = torch.tensor([1])
-        assert compute_rmse(preds, targets, num_probes).item() == pytest.approx(3.0, rel=1e-4)
+        assert compute_rmse(preds, targets, num_probes).item() == pytest.approx(
+            3.0, rel=1e-4
+        )
 
 
 class TestComputeNrmse:
@@ -88,4 +95,6 @@ class TestComputeNrmse:
         preds = torch.zeros(1, 3)
         targets = torch.tensor([[2.0, 2.0, 999.0]])
         num_probes = torch.tensor([2])
-        assert compute_nrmse(preds, targets, num_probes).item() == pytest.approx(100.0, rel=1e-4)
+        assert compute_nrmse(preds, targets, num_probes).item() == pytest.approx(
+            100.0, rel=1e-4
+        )
