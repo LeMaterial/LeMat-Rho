@@ -20,17 +20,21 @@ Diff vs upstream:
   `--val-probes`, sampled without replacement) over a deterministic
   seeded subsample of the val split (`--val-max-samples`). Upstream's
   5000-probe with-replacement val collate OOM-killed job 5004725.
+- Generated train/val splits are seeded (`--split-seed`, default 0) via
+  `generate_datasplits` instead of upstream's unseeded
+  `np.random.permutation`, so restarts with `--load_model` and all DDP
+  ranks reproduce the same split without a `--split_file`.
 """
 
 from __future__ import annotations
 
+import argparse
+import itertools
+import json
+import logging
+import math
 import os
 import sys
-import json
-import argparse
-import math
-import logging
-import itertools
 import timeit
 from pathlib import Path
 
@@ -106,11 +110,12 @@ except ImportError:
     _asap3_stub.FullNeighborList = _AseFullNeighborList
     sys.modules["asap3"] = _asap3_stub
 
-import densitymodel  # noqa: E402  (upstream module)
-import dataset  # noqa: E402  (upstream module)
+import dataset
+import densitymodel
 
-from deepdft_ft.data import (  # noqa: E402
+from deepdft_ft.data import (
     LeMatRhoDeepDFTDataset,
+    generate_datasplits,
     sample_probe_indices,
 )
 
@@ -171,6 +176,14 @@ def get_arguments(arg_list=None):
         type=str,
         default=None,
         help="Train/test/validation split file json",
+    )
+    parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=0,
+        help="Seed for the generated train/val split (used when no "
+        "--split_file is given). Fixed default so restarts with "
+        "--load_model and all DDP ranks reproduce the same split",
     )
     parser.add_argument(
         "--num_interactions",
@@ -243,7 +256,7 @@ def get_arguments(arg_list=None):
     return parser.parse_args(arg_list)
 
 
-class AverageMeter(object):
+class AverageMeter:
     """Computes and stores the average and current value"""
 
     def __init__(self, name, fmt=":f"):
@@ -354,13 +367,10 @@ def split_data(dataset, args):
         with open(args.split_file, "r") as fp:
             splits = json.load(fp)
     else:
-        datalen = len(dataset)
-        num_validation = int(math.ceil(datalen * 0.05))
-        indices = np.random.permutation(len(dataset))
-        splits = {
-            "train": indices[num_validation:].tolist(),
-            "validation": indices[:num_validation].tolist(),
-        }
+        # Seeded and restart-stable: resumes with --load_model and no
+        # --split_file regenerate this split, and upstream's unseeded
+        # np.random.permutation leaked previous val rows into train.
+        splits = generate_datasplits(len(dataset), args.split_seed)
 
         # Save split file
         with open(os.path.join(args.output_dir, "datasplits.json"), "w") as f:
@@ -426,7 +436,7 @@ def main():
 
     # DDP setup (no-op when WORLD_SIZE=1). Must precede device + dataset
     # construction; each rank pins itself to its own GCD via local_rank.
-    rank, local_rank, world_size = _setup_ddp()
+    rank, local_rank, _world_size = _setup_ddp()
     is_main = _is_main(rank)
 
     # Override device for DDP runs.
@@ -524,9 +534,10 @@ def main():
     )
     # Deterministic seeded subsample of the val split. The 5% split is
     # ~3.3k materials while upstream val sets were ~100; a full pass with
-    # the python-loop collate takes hours per log interval. The fixed seed
-    # keeps the subset identical across restarts so best_val_mae stays
-    # comparable.
+    # the python-loop collate takes hours per log interval. This subsample
+    # is only restart-stable because the parent split is too (seeded via
+    # --split-seed in split_data); together they keep best_val_mae
+    # comparable across restarts.
     val_split = datasplits["validation"]
     if args.val_max_samples is not None and len(val_split) > args.val_max_samples:
         val_rng = np.random.default_rng(0)
@@ -572,7 +583,7 @@ def main():
     # Setup optimizer
     optimizer = torch.optim.Adam(net.parameters(), lr=0.0001)
     criterion = torch.nn.MSELoss()
-    scheduler_fn = lambda step: 0.96 ** (step / 100000)  # noqa: E731 (vendored)
+    scheduler_fn = lambda step: 0.96 ** (step / 100000)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, scheduler_fn)
 
     log_interval = 5000

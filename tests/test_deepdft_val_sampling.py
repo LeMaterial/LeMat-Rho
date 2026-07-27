@@ -21,8 +21,10 @@ These tests pin the fix contract:
   --val-max-samples flags and points at the 15cube dataset.
 
 Kept free of any DeepDFT-repo import: ``deepdft_ft.runner`` needs the
-upstream clone on sys.path, but the sampling helper and the dataset
-adapter live in ``deepdft_ft.data`` which imports standalone.
+upstream DeepDFT clone on sys.path, but the sampling helper and the
+dataset adapter live in ``deepdft_ft.data``, which needs only the
+``../charge3net`` sibling (for the shared parquet helpers). The whole
+module skips when that sibling is absent.
 """
 
 from __future__ import annotations
@@ -37,6 +39,11 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
+try:
+    import charge3net_ft.data  # noqa: F401
+except (ImportError, RuntimeError) as exc:
+    pytest.skip(f"charge3net sibling repo unavailable: {exc}", allow_module_level=True)
 
 
 # ---------------------------------------------------------------------------

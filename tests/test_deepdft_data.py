@@ -14,6 +14,10 @@ Our adapter ``LeMatRhoDeepDFTDataset`` reuses the existing
 ``_row_to_atoms_and_density`` and ``_build_parquet_index`` helpers in
 ``charge3net_ft.data`` (so the input pipeline is shared between models) and
 returns DeepDFT's dict shape directly. No tar/CHGCAR conversion needed.
+
+``charge3net_ft.data`` needs the ``../charge3net`` sibling clone (its
+module-level sys.path block raises RuntimeError without it), so the whole
+module skips when the sibling is absent.
 """
 
 from __future__ import annotations
@@ -27,6 +31,11 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
+try:
+    import charge3net_ft.data  # noqa: F401
+except (ImportError, RuntimeError) as exc:
+    pytest.skip(f"charge3net sibling repo unavailable: {exc}", allow_module_level=True)
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +194,36 @@ class TestLeMatRhoDeepDFTDataset:
             assert sample["density"].shape == (10, 10, 10)
 
 
+class TestGenerateDatasplits:
+    """The runner's train/val split must be restart-stable.
+
+    submit_deepdft_adastra.sh resumes with --load_model and no --split_file,
+    so the split is regenerated on every restart. An unseeded permutation
+    then leaks previous val rows into train (and DDP ranks disagree); two
+    computations with identical args must produce identical splits.
+    """
+
+    def test_same_args_give_same_split(self):
+        from deepdft_ft.data import generate_datasplits
+
+        assert generate_datasplits(100) == generate_datasplits(100)
+
+    def test_split_is_disjoint_and_complete(self):
+        from deepdft_ft.data import generate_datasplits
+
+        splits = generate_datasplits(100)
+        assert len(splits["validation"]) == 5  # ceil(100 * 0.05), as upstream
+        assert sorted(splits["train"] + splits["validation"]) == list(range(100))
+
+    def test_different_seed_changes_split(self):
+        from deepdft_ft.data import generate_datasplits
+
+        assert generate_datasplits(100, seed=0) != generate_datasplits(100, seed=1)
+
+
 class TestRaisesOnEmptyDir:
     def test_no_chunks_in_dir_raises(self):
         from deepdft_ft.data import LeMatRhoDeepDFTDataset
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with pytest.raises(FileNotFoundError):
-                LeMatRhoDeepDFTDataset(parquet_dir=Path(tmp))
+        with tempfile.TemporaryDirectory() as tmp, pytest.raises(FileNotFoundError):
+            LeMatRhoDeepDFTDataset(parquet_dir=Path(tmp))

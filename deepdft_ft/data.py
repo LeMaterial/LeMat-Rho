@@ -25,8 +25,8 @@ addition only needs one regression test.
 from __future__ import annotations
 
 import collections
+import math
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -37,7 +37,6 @@ from charge3net_ft.data import (
     _build_parquet_index,
     _row_to_atoms_and_density,
 )
-
 
 # Per-worker cache, separate from charge3net_ft's so the two pipelines don't
 # step on each other when running side by side in the same process.
@@ -98,6 +97,43 @@ def sample_probe_indices(
     return rng.integers(n_grid_points, size=n_probes)
 
 
+def generate_datasplits(datalen: int, seed: int = 0) -> dict[str, list[int]]:
+    """Generate the runner's 95/5 train/validation split of ``datalen`` rows.
+
+    Upstream DeepDFT drew ``np.random.permutation`` unseeded, so a job that
+    restarts with ``--load_model`` and no ``--split_file`` (exactly what
+    submit_deepdft_adastra.sh does) regenerated a DIFFERENT split and leaked
+    previous validation rows into train; DDP ranks could disagree the same
+    way. Seeding makes the split a pure function of (datalen, seed).
+
+    Kept here, DeepDFT-import-free, so it stays testable without the
+    upstream clone on sys.path (same rationale as ``sample_probe_indices``).
+
+    Parameters
+    ----------
+    datalen : int
+        Total number of samples in the dataset.
+    seed : int
+        Split RNG seed (the runner's ``--split-seed``, default 0).
+
+    Returns
+    -------
+    dict
+        ``{"train": [...], "validation": [...]}`` index lists; validation
+        holds ``ceil(0.05 * datalen)`` rows, matching upstream.
+
+    .. code-block:: python
+
+        splits = generate_datasplits(len(dataset), seed=args.split_seed)
+    """
+    num_validation = math.ceil(datalen * 0.05)
+    indices = np.random.default_rng(seed).permutation(datalen)
+    return {
+        "train": indices[num_validation:].tolist(),
+        "validation": indices[:num_validation].tolist(),
+    }
+
+
 def _calculate_grid_pos(density: np.ndarray, origin: np.ndarray, cell) -> np.ndarray:
     """Cartesian probe positions for an (Nx, Ny, Nz) density grid.
 
@@ -146,7 +182,7 @@ class LeMatRhoDeepDFTDataset(Dataset):
     def __init__(
         self,
         parquet_dir: str | Path | None = None,
-        _shared_index: Optional[tuple] = None,
+        _shared_index: tuple | None = None,
     ):
         if _shared_index is not None:
             self._file_paths, self._index = _shared_index
