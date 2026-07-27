@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from ase.data import atomic_numbers as ASE_ATOMIC_NUMBERS
 
 # scdp lives in the sibling boa clone, editable-installed. See boa_ft/README.md.
 from scdp.data.data import AtomicData
@@ -95,6 +96,31 @@ def row_to_atomic_data(
         max_neighbors=max_neighbors,
         struct=None,
     )
+
+
+def row_exceeds_max_z(row: dict, max_z: int) -> bool:
+    """Return True when a row contains an element heavier than ``max_z``.
+
+    Used to drop materials the GTO basis cannot represent (def2-svp covers
+    H through Rn, Z <= 86, so actinide-bearing rows must be excluded).
+
+    Parameters
+    ----------
+    row : dict
+        Row with the LeMat-Rho columns (needs ``species_at_sites``).
+    max_z : int
+        Highest allowed atomic number.
+
+    Returns
+    -------
+    bool
+        True if any site's element has Z above ``max_z``.
+
+    .. code-block:: python
+
+        row_exceeds_max_z({"species_at_sites": ["U", "O", "O"]}, 86)  # True
+    """
+    return any(ASE_ATOMIC_NUMBERS[s] > max_z for s in row["species_at_sites"])
 
 
 def write_datasplits(
@@ -167,6 +193,7 @@ def main(args: argparse.Namespace) -> None:
 
     n_written = 0
     n_failed = 0
+    n_heavy = 0
     # Per-sample element sets, indexed by global write order. BOA's
     # construct_orbitals aligns the basis positionally against the *training*
     # split's unique elements, so the basis element list must be exactly the
@@ -201,6 +228,9 @@ def main(args: argparse.Namespace) -> None:
             chunk_stem = file_paths[fi].stem
             metadata = f"{chunk_stem}_row{ri:06d}"
             row = read_row(fi, ri)
+            if args.max_z is not None and row_exceeds_max_z(row, args.max_z):
+                n_heavy += 1
+                continue
             try:
                 data = row_to_atomic_data(
                     row, metadata, z_table, args.atom_cutoff, args.max_neighbors
@@ -240,7 +270,7 @@ def main(args: argparse.Namespace) -> None:
 
     print(
         f"wrote {n_written} samples to {data_dir} across {num_shards} shard(s); "
-        f"skipped {n_failed} unconvertible row(s)"
+        f"skipped {n_failed} unconvertible row(s) and {n_heavy} row(s) above max-z"
     )
     print(f"atomic_numbers ({len(atomic_numbers)}): {atomic_numbers}")
     print(
@@ -284,6 +314,15 @@ def get_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional cap on neighbors per atom in the stored graph.",
+    )
+    parser.add_argument(
+        "--max-z",
+        type=int,
+        default=None,
+        help=(
+            "Skip rows containing any element with Z above this "
+            "(86 keeps def2-svp basis coverage; actinides have no basis)."
+        ),
     )
     parser.add_argument(
         "--map-size-gb",

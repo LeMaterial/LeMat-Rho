@@ -87,6 +87,20 @@ class TestRowToAtomicData:
             )
 
 
+class TestRowExceedsMaxZ:
+    """Rows with elements beyond the basis coverage are flagged for skipping."""
+
+    def test_actinide_row_exceeds_def2_svp_ceiling(self):
+        from boa_ft.preprocess import row_exceeds_max_z
+
+        assert row_exceeds_max_z({"species_at_sites": ["U", "O", "O"]}, 86)
+
+    def test_light_row_passes(self):
+        from boa_ft.preprocess import row_exceeds_max_z
+
+        assert not row_exceeds_max_z({"species_at_sites": ["H", "Rn"]}, 86)
+
+
 class TestWriteDatasplits:
     """Splits are disjoint, cover the whole range, and match charge3net sizes."""
 
