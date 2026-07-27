@@ -24,6 +24,7 @@ addition only needs one regression test.
 
 from __future__ import annotations
 
+import collections
 from pathlib import Path
 from typing import Optional
 
@@ -40,7 +41,61 @@ from charge3net_ft.data import (
 
 # Per-worker cache, separate from charge3net_ft's so the two pipelines don't
 # step on each other when running side by side in the same process.
-_DEEPDFT_TABLE_CACHE: dict = {}
+#
+# Bounded LRU, ported from charge3net_ft.data: the unbounded dict version of
+# this cache held one decompressed pyarrow table (~2 GB with the inflated
+# compressed_charge_density strings) per chunk file forever, the same failure
+# mode that OOM-killed charge3net jobs 4971293/4971343. Cap of 5 chunks keeps
+# each worker's cache around 10 GB worst case. OrderedDict gives O(1) LRU.
+_DEEPDFT_TABLE_CACHE_MAX_CHUNKS = 5
+_DEEPDFT_TABLE_CACHE: collections.OrderedDict[str, object] = collections.OrderedDict()
+
+
+def sample_probe_indices(
+    n_grid_points: int,
+    n_probes: int,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """Sample flat grid indices for density probes, capped at ``n_probes``.
+
+    Upstream DeepDFT samples probes WITH replacement
+    (``np.random.randint``), which on a 1000-point LeMat-Rho grid with
+    5000 probes yields 5x duplicates for zero statistical value while
+    ``probes_to_graph`` cost grows quadratically in the probe count
+    (the host-RAM OOM in job 5004725). This helper samples without
+    replacement whenever the grid has at least ``n_probes`` points, and
+    always returns exactly ``n_probes`` indices (upstream padding/eval
+    assumes a uniform probe count per sample, so grids smaller than the
+    cap fall back to with-replacement sampling rather than shrinking).
+
+    Kept here, DeepDFT-import-free, so it stays testable without the
+    upstream clone on sys.path (same rationale as ``_calculate_grid_pos``).
+
+    Parameters
+    ----------
+    n_grid_points : int
+        Total number of grid points (``prod(grid_shape)``).
+    n_probes : int
+        Number of probe indices to draw.
+    rng : np.random.Generator, optional
+        Source of randomness; a fresh default generator when omitted.
+
+    Returns
+    -------
+    indices : np.ndarray of shape (n_probes,)
+        Flat indices into the grid, unique when
+        ``n_grid_points >= n_probes``.
+
+    .. code-block:: python
+
+        flat = sample_probe_indices(15**3, 1000)
+        probe_choice = np.unravel_index(flat, grid_pos.shape[0:3])
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    if n_grid_points >= n_probes:
+        return rng.choice(n_grid_points, size=n_probes, replace=False)
+    return rng.integers(n_grid_points, size=n_probes)
 
 
 def _calculate_grid_pos(density: np.ndarray, origin: np.ndarray, cell) -> np.ndarray:
@@ -108,11 +163,18 @@ class LeMatRhoDeepDFTDataset(Dataset):
 
         Cache is keyed by the absolute parquet path (not the integer ``fi``)
         so multiple ``LeMatRhoDeepDFTDataset`` instances pointing at different
-        directories don't collide on ``fi=0``.
+        directories don't collide on ``fi=0``. Capped at
+        ``_DEEPDFT_TABLE_CACHE_MAX_CHUNKS`` entries; on a miss past capacity
+        the least recently used chunk is evicted.
         """
         fi, ri = self._index[idx]
         key = str(self._file_paths[fi].resolve())
-        if key not in _DEEPDFT_TABLE_CACHE:
+        if key in _DEEPDFT_TABLE_CACHE:
+            # Refresh recency on hit so hot chunks survive eviction.
+            _DEEPDFT_TABLE_CACHE.move_to_end(key)
+        else:
+            if len(_DEEPDFT_TABLE_CACHE) >= _DEEPDFT_TABLE_CACHE_MAX_CHUNKS:
+                _DEEPDFT_TABLE_CACHE.popitem(last=False)
             _DEEPDFT_TABLE_CACHE[key] = pq.read_table(
                 self._file_paths[fi], columns=_COLUMNS
             )

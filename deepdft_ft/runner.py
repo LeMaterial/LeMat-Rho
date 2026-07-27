@@ -16,6 +16,10 @@ Diff vs upstream:
 - Model wrapped in `DistributedDataParallel`; checkpoint save/load unwraps
   via `_unwrap`.
 - Logging + checkpoint writes gated on rank 0.
+- Validation uses `ValCollateFuncRandomSample` (capped probe count via
+  `--val-probes`, sampled without replacement) over a deterministic
+  seeded subsample of the val split (`--val-max-samples`). Upstream's
+  5000-probe with-replacement val collate OOM-killed job 5004725.
 """
 
 from __future__ import annotations
@@ -105,7 +109,10 @@ except ImportError:
 import densitymodel  # noqa: E402  (upstream module)
 import dataset  # noqa: E402  (upstream module)
 
-from deepdft_ft.data import LeMatRhoDeepDFTDataset  # noqa: E402
+from deepdft_ft.data import (  # noqa: E402
+    LeMatRhoDeepDFTDataset,
+    sample_probe_indices,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +224,22 @@ def get_arguments(arg_list=None):
         help="If flag is given, force periodic boundary conditions to True in atoms data",
     )
 
+    parser.add_argument(
+        "--val-probes",
+        type=int,
+        default=1000,
+        help="Probes per material in validation. probes_to_graph cost grows "
+        "quadratically in this number; 5000 OOM-killed the 64 GB job 5004725",
+    )
+
+    parser.add_argument(
+        "--val-max-samples",
+        type=int,
+        default=200,
+        help="Deterministic seeded subsample size of the validation split "
+        "(upstream val sets were ~100 materials; ours is ~3.3k)",
+    )
+
     return parser.parse_args(arg_list)
 
 
@@ -243,6 +266,86 @@ class AverageMeter(object):
     def __str__(self):
         fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
         return fmtstr.format(**self.__dict__)
+
+
+class ValCollateFuncRandomSample(dataset.CollateFuncRandomSample):
+    """Validation collate with capped, without-replacement probe sampling.
+
+    Upstream ``atoms_and_probe_sample_to_graph_dict`` draws probes WITH
+    replacement (``np.random.randint``) and ``probes_to_graph`` inserts
+    every probe as a dummy atom into a periodic bothways neighborlist,
+    so probe-probe pairs grow quadratically in the probe count. On the
+    tiny LeMat-Rho cells (volume p50 89 A^3) 5000 probes meant ~75M
+    pairs per median material, which OOM-killed the 64 GB jobs
+    5003891/5004725 during the step-0 val pass. This subclass keeps the
+    upstream graph construction but samples probe indices via
+    ``sample_probe_indices`` (without replacement when the grid has at
+    least ``num_probes`` points).
+
+    .. code-block:: python
+
+        collate = ValCollateFuncRandomSample(cutoff=4.0, num_probes=1000)
+        batch = collate([sample_dict_a, sample_dict_b])
+    """
+
+    def __call__(self, input_dicts: list) -> dict:
+        graphs = []
+        for i in input_dicts:
+            if self.set_pbc is not None:
+                atoms = i["atoms"].copy()
+                atoms.set_pbc(self.set_pbc)
+            else:
+                atoms = i["atoms"]
+            graphs.append(self._sample_to_graph_dict(i, atoms))
+        return dataset.collate_list_of_dicts(graphs, pin_memory=self.pin_memory)
+
+    def _sample_to_graph_dict(self, sample: dict, atoms) -> dict:
+        """Upstream ``atoms_and_probe_sample_to_graph_dict`` with the probe
+        selection swapped for capped, without-replacement sampling."""
+        grid_pos = sample["grid_position"]
+        density = sample["density"]
+        flat_choice = sample_probe_indices(
+            int(np.prod(grid_pos.shape[0:3])), self.num_probes
+        )
+        probe_choice = np.unravel_index(flat_choice, grid_pos.shape[0:3])
+        probe_pos = grid_pos[probe_choice]
+        probe_target = density[probe_choice]
+
+        atom_edges, atom_edges_displacement, neighborlist, inv_cell_T = (
+            dataset.atoms_to_graph(atoms, self.cutoff)
+        )
+        probe_edges, probe_edges_displacement = dataset.probes_to_graph(
+            atoms,
+            probe_pos,
+            self.cutoff,
+            neighborlist=neighborlist,
+            inv_cell_T=inv_cell_T,
+        )
+
+        default_type = torch.get_default_dtype()
+        if not probe_edges:
+            probe_edges = [np.zeros((0, 2), dtype=int)]
+            probe_edges_displacement = [np.zeros((0, 3), dtype=int)]
+        res = {
+            "nodes": torch.tensor(atoms.get_atomic_numbers()),
+            "atom_edges": torch.tensor(np.concatenate(atom_edges, axis=0)),
+            "atom_edges_displacement": torch.tensor(
+                np.concatenate(atom_edges_displacement, axis=0), dtype=default_type
+            ),
+            "probe_edges": torch.tensor(np.concatenate(probe_edges, axis=0)),
+            "probe_edges_displacement": torch.tensor(
+                np.concatenate(probe_edges_displacement, axis=0), dtype=default_type
+            ),
+            "probe_target": torch.tensor(probe_target, dtype=default_type),
+        }
+        res["num_nodes"] = torch.tensor(res["nodes"].shape[0])
+        res["num_atom_edges"] = torch.tensor(res["atom_edges"].shape[0])
+        res["num_probe_edges"] = torch.tensor(res["probe_edges"].shape[0])
+        res["num_probes"] = torch.tensor(res["probe_target"].shape[0])
+        res["probe_xyz"] = torch.tensor(probe_pos, dtype=default_type)
+        res["atom_xyz"] = torch.tensor(atoms.get_positions(), dtype=default_type)
+        res["cell"] = torch.tensor(np.array(atoms.get_cell()), dtype=default_type)
+        return res
 
 
 def split_data(dataset, args):
@@ -375,11 +478,13 @@ def main():
 
     # Split data into train and validation sets
     datasplits = split_data(densitydata, args)
-    # Pool_size and num_workers downsized for LeMat-Rho cells whose r2SCAN
-    # CHGCARs are larger than the QM9/MP grids upstream was tuned for: the
-    # rotating pool keeps full grids in RAM per worker (pool_size *
-    # num_workers concurrent structures), and a handful of 200-300^3 cells
-    # is enough to OOM the 64 GB job at the upstream 20*4 = 80.
+    # Pool_size and num_workers downsized from the upstream 20*4 = 80.
+    # (An earlier comment here blamed 200-300^3 cells for the 64 GB OOMs;
+    # LeMat-Rho grids are actually tiny, 10-15 points per axis. The real
+    # host-RAM cost is probe-count quadratic neighborlist growth in
+    # probes_to_graph, measured on jobs 5003891/5004725; see
+    # ValCollateFuncRandomSample. The small pool is still kept: it bounds
+    # how many decoded parquet rows sit in RAM per worker.)
     datasplits["train"] = dataset.RotatingPoolData(datasplits["train"], 5)
 
     if args.ignore_pbc and args.force_pbc:
@@ -406,29 +511,45 @@ def main():
         datasplits["train"],
         2,
         # See RotatingPoolData(...5) above; num_workers compounds the RAM
-        # footprint of the rotating pool. 2 workers x 5 pool = 10 grids in
-        # RAM peak, well below 64 GB for the LeMat-Rho size distribution.
+        # footprint of the rotating pool (pool_size * num_workers decoded
+        # rows resident per worker). The dominant transient cost per batch
+        # is the probe neighborlist, quadratic in the probe count (1000
+        # train probes -> ~3M pairs / ~6.6 GB peak on the median material,
+        # measured on jobs 5003891/5004725), so keep both knobs small.
         num_workers=2,
         sampler=train_sampler,
         collate_fn=dataset.CollateFuncRandomSample(
             args.cutoff, 1000, pin_memory=False, set_pbc_to=set_pbc
         ),
     )
+    # Deterministic seeded subsample of the val split. The 5% split is
+    # ~3.3k materials while upstream val sets were ~100; a full pass with
+    # the python-loop collate takes hours per log interval. The fixed seed
+    # keeps the subset identical across restarts so best_val_mae stays
+    # comparable.
+    val_split = datasplits["validation"]
+    if args.val_max_samples is not None and len(val_split) > args.val_max_samples:
+        val_rng = np.random.default_rng(0)
+        val_keep = val_rng.choice(
+            len(val_split), size=args.val_max_samples, replace=False
+        )
+        val_split = torch.utils.data.Subset(val_split, sorted(val_keep.tolist()))
     val_loader = torch.utils.data.DataLoader(
-        datasplits["validation"],
+        val_split,
         2,
-        collate_fn=dataset.CollateFuncRandomSample(
-            args.cutoff, 5000, pin_memory=False, set_pbc_to=set_pbc
+        # ValCollateFuncRandomSample caps probes at args.val_probes (default
+        # 1000, NOT prod(grid_shape): at the 15^3 = 3375-point grids the
+        # quadratic neighborlist cost would already flirt with the 64 GB
+        # ceiling) and samples without replacement. The upstream 5000-probe
+        # with-replacement collate OOM-killed job 5004725 at step 0.
+        collate_fn=ValCollateFuncRandomSample(
+            args.cutoff, args.val_probes, pin_memory=False, set_pbc_to=set_pbc
         ),
         num_workers=0,
     )
     # Upstream materialised the full val_loader into a list at startup for
-    # speed ("Preloading validation batch"). Their NMC/QM9/ethyleneCarbonate
-    # val sets are ~100 materials so that's cheap. Ours is ~3.3 k materials
-    # x 5 000 probes/material -> ~150 GB if eagerly preloaded, which OOM-killed
-    # job 4971720. Leave val_loader as a streaming DataLoader instead; the
-    # data-loading overhead per val pass is negligible compared to DDP
-    # gradient sync (when DDP is enabled). Hyperparameters are unchanged.
+    # speed ("Preloading validation batch"); with our larger val split we
+    # keep it streaming instead (eager preloading OOM-killed job 4971720).
 
     # Initialise model
     device = torch.device(args.device)

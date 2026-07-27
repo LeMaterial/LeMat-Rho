@@ -3,8 +3,10 @@
 #
 # Faithful to peterbjorgensen/DeepDFT paper settings:
 #   - 1 GCD (paper used 1x RTX 3090; we use 1x MI250X)
-#   - batch=2 materials, train=1000 probes/material, val=5000 probes/material
-#     (hardcoded in deepdft_ft/runner.py, same as upstream)
+#   - batch=2 materials, train=1000 probes/material (same as upstream);
+#     val=1000 probes/material over a 200-material seeded subsample
+#     (upstream's val=5000 probes OOM-killed the 64 GB job 5004725: the
+#     probe neighborlist grows quadratically in the probe count)
 #   - cutoff=4 A, num_interactions=3, node_size=128, PaiNN model
 #   - max_steps=10,000,000
 #
@@ -39,7 +41,7 @@ set -eo pipefail
 # --- Paths ---
 SETUP="${LEMATRHO_ADASTRA_SETUP:-/lus/scratch/CT10/cad16353/msiron/charge3net_setup}"
 WORK_DIR="$SETUP/LeMat-Rho"
-DATA_DIR="$SETUP/charge3net_data"
+DATA_DIR="$SETUP/charge3net_data_15cube"
 DEEPDFT_REPO="$SETUP/DeepDFT"
 
 # --- Model variant ---
@@ -74,6 +76,8 @@ TRAIN_ARGS=(
     --node_size 128
     --max_steps 10000000
     --device cuda
+    --val-probes 1000
+    --val-max-samples 200
     "${EXTRA_ARGS[@]}"
 )
 if [ -f "$OUTPUT_DIR/best_model.pth" ]; then
@@ -98,7 +102,7 @@ export HTTPS_PROXY=$HTTP_PROXY
 export http_proxy=$HTTP_PROXY
 export https_proxy=$HTTP_PROXY
 
-source "$SETUP/venv311/bin/activate"
+source "$SETUP/venv311_fresh/bin/activate"
 
 export PYTHONPATH="$WORK_DIR:$DEEPDFT_REPO:$PYTHONPATH"
 export PYTHONUNBUFFERED=1
