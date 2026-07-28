@@ -1,0 +1,5 @@
+defaults:
+  - transform: lematrho
+
+_target_: boa.data.dataset.LmdbDataset
+path: ${paths.data_dir}/${data.dataset_name}/data
