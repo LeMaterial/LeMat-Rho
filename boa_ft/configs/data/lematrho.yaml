@@ -1,0 +1,18 @@
+defaults:
+  - datamodule: lematrho
+
+dataset_name: lematrho
+
+# Uncontracted def2-svp: a compact basis that keeps the per-sample pyscf
+# overlap (built in the dataloader) affordable for many-element solids.
+# atomic_numbers must list every element present in the LMDB. Preprocess writes
+# the exact list to <out-dir>/atomic_numbers.json; override this at launch, e.g.
+#   data.basis_info.atomic_numbers='[1, 8, 26]'
+# The default below is only a placeholder for smoke runs.
+basis_info:
+  _target_: boa.data.basis_info.BasisInfo.from_atomic_numbers_with_even_tempered_basis
+  basis: 'def2-svp'
+  atomic_numbers: [1, 8]
+  beta: None
+  even_tempered: false
+  uncontracted: True

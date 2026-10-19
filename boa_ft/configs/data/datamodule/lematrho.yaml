@@ -1,0 +1,15 @@
+defaults:
+  - default
+  - dataset: lematrho
+
+_target_: boa.data.datamodule.ProbeDataModule
+
+batch_size:
+  train: 4
+  val: 4
+  test: 4
+
+# 15x15x15 grids hold 3375 points per material; 2000 probes subsamples each
+# sample. The datamodule default sets n_probe.val/test equal to n_probe.train.
+n_probe:
+  train: 2000

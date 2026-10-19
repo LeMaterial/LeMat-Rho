@@ -1,0 +1,27 @@
+# @package _global_
+
+# LeMat-Rho periodic solids: enable the periodic density decoder and keep the
+# orbital cutoff tight (3.0 A) so the periodic image replication inside
+# GTOs.forward stays cheap for dense cells.
+defaults:
+  - override /data: lematrho
+
+name: lematrho
+
+# BOA runs its initial-guess pre-training as a separate Trainer that builds a
+# second datamodule on the same LMDB. py-lmdb refuses to open one environment
+# twice in a process, so the LMDB-backed path cannot pre-train in the same run.
+# We disable the separate phase; the initial-guess module still trains jointly
+# inside the main loop (it is part of the BOA net's forward).
+initial_guess_pre_training_steps: 0
+
+model:
+  pbc: true
+  orb_cutoff: 3.0
+  # Linear basis: sum independent atom-centered orbital contributions. BOA's
+  # non-linear (pairwise) orbital_inference matches every edge with its flip by
+  # unique-column bookkeeping that produces out-of-bounds indices under
+  # pbc=true (it was written for the non-periodic QM9 case). The linear path
+  # (orbital_inference_linear) has a clean periodic summation, so we use it for
+  # periodic solids.
+  linear_basis: true
